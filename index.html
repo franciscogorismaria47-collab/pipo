@@ -37,78 +37,221 @@
 "use strict";
 const cv = document.getElementById("c");
 const ctx = cv.getContext("2d");
-const W = 800, H = 450, GY = 370;
+const W = 800, H = 450, GY = 370, TOTAL = 10;
+const SPEED = 280, SPRINT = 1.65, GRAV = 1700, JUMP = 640;
 
-/* ---------- Nivel ---------- */
-const segs = [[0,1500],[1650,2800],[2950,4100],[4250,5300],[5450,6600],[6750,7900],[8050,9200],[9350,11500]];
-const WORLD = 11500, GOALX = 11280;
-const solids = [], coins = [], enemies = [];
-const checkpoints = [{x: 60}, {x: segs[3][0] + 120}, {x: segs[5][0] + 120}];
+/* ---------- Temas por nivel ---------- */
+const NAMES = ["El Valle", "Las Colinas", "Atardecer", "Crepúsculo", "Noche Larga", "Hielo", "Volcán", "El Abismo", "Tormenta", "La Torre Final"];
+const THEMES = [
+  {s1: "#4fa8ff", s2: "#bfe8ff", h1: "#7ac9a0", h2: "#4ea87a", top: "#4cc152", hi: "#6fe070", dirt: "#8a5a35", dirt2: "#6f4627", sun: "#fff6b0", cloud: "rgba(255,255,255,.85)"},
+  {s1: "#5b8cff", s2: "#ffe7b8", h1: "#8fcf8a", h2: "#5fae6a", top: "#58c04c", hi: "#7be26a", dirt: "#8a5a35", dirt2: "#6f4627", sun: "#fff0a0", cloud: "rgba(255,255,255,.85)"},
+  {s1: "#ff7b54", s2: "#ffd194", h1: "#c0728a", h2: "#8a4f73", top: "#9ac34a", hi: "#b9de63", dirt: "#7a4a3a", dirt2: "#5e382c", sun: "#fff2c0", cloud: "rgba(255,230,210,.8)"},
+  {s1: "#3b2a6e", s2: "#d4739a", h1: "#6d4a8f", h2: "#4a3270", top: "#7aa84a", hi: "#98c860", dirt: "#5a3b50", dirt2: "#452c3f", sun: "#ffe0b0", cloud: "rgba(255,200,220,.55)"},
+  {s1: "#070c2a", s2: "#2b3a7a", h1: "#23306a", h2: "#18214f", top: "#3f9a8a", hi: "#5fc4b2", dirt: "#2e3358", dirt2: "#232745", sun: "#e8eeff", cloud: "rgba(120,140,220,.25)", stars: 1},
+  {s1: "#7ccaf0", s2: "#eefaff", h1: "#cfe9f7", h2: "#a8d4ea", top: "#e8fbff", hi: "#ffffff", dirt: "#6f93b3", dirt2: "#587a99", sun: "#ffffff", cloud: "rgba(255,255,255,.9)"},
+  {s1: "#2a0a0a", s2: "#ff6a3d", h1: "#6a2020", h2: "#421212", top: "#e0602a", hi: "#ff9a4a", dirt: "#4a2424", dirt2: "#361818", sun: "#ffd27a", cloud: "rgba(80,30,30,.5)"},
+  {s1: "#12051f", s2: "#6a1f6e", h1: "#4a1a58", h2: "#2e0f3a", top: "#b04ad0", hi: "#d77af0", dirt: "#33173f", dirt2: "#25102f", sun: "#ffd0ff", cloud: "rgba(200,120,220,.25)", stars: 1},
+  {s1: "#26323d", s2: "#8a9aa5", h1: "#5d6e78", h2: "#44525c", top: "#7a9a6a", hi: "#98ba86", dirt: "#4a5359", dirt2: "#394146", sun: "#d8dde0", cloud: "rgba(60,70,80,.6)"},
+  {s1: "#0a0a2a", s2: "#4a3a7a", h1: "#6a5a3a", h2: "#3f351f", top: "#f2c230", hi: "#ffe27a", dirt: "#3a3050", dirt2: "#2a2240", sun: "#fff2a0", cloud: "rgba(255,230,140,.25)", stars: 1}
+];
 
+/* ---------- Estado del nivel ---------- */
+let solids = [], coins = [], enemies = [], spikes = [], checkpoints = [];
+let WORLD = 11500, GOALX = 11280, goalY = GY, theme = THEMES[0];
+let lvl = 1, scoreStart = 0;
+let p, cam = 0, lives = 3, score = 0, state = "title", cp, elapsed = 0, finalT = 0, hurtT = 0, shake = 0, t0 = 0, stateT = 0, introT = 0, mt = 0;
+
+function loadSaved() { try { const v = parseInt(localStorage.getItem("pipo_lvl_v2"), 10); if (v >= 1 && v <= TOTAL) return v; } catch (e) {} return 1; }
+function save(v) { try { localStorage.setItem("pipo_lvl_v2", String(v)); } catch (e) {} }
+
+/* ---------- Generacion de niveles ---------- */
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function ground(a, b, y) { solids.push({x: a, y, w: b - a, h: H - y, type: "ground"}); }
 function addCoin(x, y) { coins.push({x, y, got: false}); }
-segs.forEach((s, i) => {
-  const a = s[0], b = s[1];
-  solids.push({x: a, y: GY, w: b - a, h: H - GY, type: "ground"});
-  if (i === 0) {
-    for (let k = 0; k < 5; k++) addCoin(a + 420 + k * 44, 320);
-    solids.push({x: a + 700, y: 270, w: 180, h: 22, type: "plat"});
-    for (let k = 0; k < 4; k++) addCoin(a + 725 + k * 40, 236);
-    enemies.push({x: a + 1000, y: GY - 28, w: 34, h: 28, dir: -1, sp: 55, min: a + 900, max: a + 1250, dead: 0});
-    return;
-  }
-  for (let k = 0; k < 5; k++) addCoin(a + 300 + k * 44, 322);
-  solids.push({x: a + 480, y: 262, w: 170, h: 22, type: "plat"});
-  for (let k = 0; k < 4; k++) addCoin(a + 505 + k * 40, 228);
-  if (i % 2 === 1) {
-    solids.push({x: a + 860, y: 330, w: 40, h: 40, type: "crate"});
-    solids.push({x: a + 900, y: 330, w: 40, h: 40, type: "crate"});
-    solids.push({x: a + 900, y: 290, w: 40, h: 40, type: "crate"});
-    addCoin(a + 920, 250);
-  } else {
-    solids.push({x: a + 830, y: 240, w: 120, h: 22, type: "plat"});
-    for (let k = 0; k < 3; k++) addCoin(a + 855 + k * 40, 206);
-  }
-  enemies.push({x: a + 700, y: GY - 28, w: 34, h: 28, dir: 1, sp: 60 + i * 4, min: a + 560, max: a + 820, dead: 0});
-  const e2max = Math.min(a + 1300, b - 120);
-  enemies.push({x: a + 1050, y: GY - 28, w: 34, h: 28, dir: -1, sp: 65 + i * 4, min: a + 980, max: e2max, dead: 0});
-});
-
-/* ---------- Estado ---------- */
-const SPEED = 280, GRAV = 1700, JUMP = 640;
-let p, cam, lives, score, state, cp, startT, elapsed, finalT, hurtT, shake, t0 = 0;
-function resetGame() {
-  p = {x: 60, y: GY - 44, w: 28, h: 44, vx: 0, vy: 0, ground: false, face: 1, anim: 0};
-  cam = 0; lives = 3; score = 0; cp = checkpoints[0]; startT = 0; elapsed = 0; finalT = 0; hurtT = 0; shake = 0;
-  coins.forEach(c => c.got = false);
-  enemies.forEach(e => { e.dead = 0; e.x = (e.min + e.max) / 2; });
+function patrol(a, b, gy, sp, kind) {
+  const e = {x: (a + b) / 2, y: gy - 28, by: gy - 28, w: 34, h: 28, dir: Math.random() < .5 ? -1 : 1, sp, min: a, max: b, dead: 0, kind: kind || "walk", t: 0, ph: 0};
+  if (kind === "bat") { e.h = 24; e.y = e.by = gy; }
+  enemies.push(e); return e;
 }
-state = "title";
-resetGame();
+/* alcance horizontal maximo (aprox) de un salto cuando el destino esta 'rise' px mas alto */
+function reach(rise, f) {
+  const disc = JUMP * JUMP - 2 * GRAV * rise;
+  return disc < 0 ? 0 : SPEED * ((JUMP + Math.sqrt(disc)) / GRAV) * f;
+}
+
+function buildLevel1() {
+  const segs = [[0,1500],[1650,2800],[2950,4100],[4250,5300],[5450,6600],[6750,7900],[8050,9200],[9350,11500]];
+  WORLD = 11500; GOALX = 11280; goalY = GY;
+  checkpoints.push({x: 60, gy: GY}, {x: segs[3][0] + 120, gy: GY}, {x: segs[5][0] + 120, gy: GY});
+  segs.forEach((s, i) => {
+    const a = s[0], b = s[1];
+    ground(a, b, GY);
+    if (i === 0) {
+      for (let k = 0; k < 5; k++) addCoin(a + 420 + k * 44, 320);
+      solids.push({x: a + 700, y: 270, w: 180, h: 22, type: "plat"});
+      for (let k = 0; k < 4; k++) addCoin(a + 725 + k * 40, 236);
+      patrol(a + 900, a + 1250, GY, 55);
+      return;
+    }
+    for (let k = 0; k < 5; k++) addCoin(a + 300 + k * 44, 322);
+    solids.push({x: a + 480, y: 262, w: 170, h: 22, type: "plat"});
+    for (let k = 0; k < 4; k++) addCoin(a + 505 + k * 40, 228);
+    if (i % 2 === 1) {
+      solids.push({x: a + 860, y: 330, w: 40, h: 40, type: "crate"});
+      solids.push({x: a + 900, y: 330, w: 40, h: 40, type: "crate"});
+      solids.push({x: a + 900, y: 290, w: 40, h: 40, type: "crate"});
+      addCoin(a + 920, 250);
+    } else {
+      solids.push({x: a + 830, y: 240, w: 120, h: 22, type: "plat"});
+      for (let k = 0; k < 3; k++) addCoin(a + 855 + k * 40, 206);
+    }
+    patrol(a + 560, a + 820, GY, 60 + i * 4);
+    patrol(a + 980, Math.min(a + 1300, b - 120), GY, 65 + i * 4);
+  });
+}
+
+function genLevel(n) {
+  const d = (n - 2) / 8, R = rng(n * 7919 + 13), LEN = 7600 + n * 520;
+  const f = 0.6 + 0.25 * d;
+  const Lg = Math.round(260 - 120 * d);
+  const rnd = (a, b) => a + R() * (b - a);
+  const ri = (a, b) => Math.floor(rnd(a, b + 1));
+  const pick = arr => arr[Math.floor(R() * arr.length)];
+  let x = 0, y = GY, cps = 0;
+  ground(0, 640, GY); x = 640; checkpoints.push({x: 60, gy: GY});
+
+  function run() {
+    const len = ri(320, 620); ground(x, x + len, y);
+    if (cps < 2 && x >= LEN * (cps + 1) / 3) { checkpoints.push({x: x + 50, gy: y}); cps++; }
+    const a = x + 70, b = x + len - 40;
+    if (b - a >= 170 && R() < 0.55 + 0.4 * d) {
+      const kind = (d >= 0.3 && R() < d + 0.15) ? "hop" : "walk";
+      const e = patrol(a, b, y, 60 + 55 * d, kind); e.ph = rnd(0, 6);
+    }
+    for (let k = 0; k < 4; k++) addCoin(x + 90 + k * 44, y - 50);
+    x += len;
+  }
+  function gap() {
+    const rise = pick([-60, -30, 0, 0, 30, 50]);
+    const ny = Math.max(240, Math.min(GY, y - rise)), r = y - ny;
+    const g = Math.max(90, Math.floor(reach(r, f) * rnd(0.8, 1)));
+    ground(x + g, x + g + Lg, ny);
+    addCoin(x + g / 2, Math.min(y, ny) - 90); addCoin(x + g / 2 - 36, Math.min(y, ny) - 70); addCoin(x + g / 2 + 36, Math.min(y, ny) - 70);
+    x += g + Lg; y = ny;
+  }
+  function stones(type) {
+    const k = ri(2, 3 + Math.round(2 * d)); let cx = x, cy = y, firstX = x;
+    for (let i = 0; i < k; i++) {
+      const rise = pick([-40, -20, 0, 20, 40, 60]);
+      const ny = Math.max(210, Math.min(360, cy - rise)), r = cy - ny;
+      const g = Math.max(70, Math.floor(reach(r, type === "crumble" ? f * 0.9 : f) * rnd(0.7, 1)));
+      const w = Math.round((type === "crumble" ? 112 - 22 * d : 132 - 58 * d) * rnd(0.92, 1.15));
+      const px = cx + g;
+      const s = {x: px, y: ny, w, h: 22, type: "plat"};
+      if (type === "crumble") s.cr = {t: -1, r: 0};
+      solids.push(s);
+      addCoin(px + w / 2, ny - 38);
+      cx = px + w; cy = ny;
+    }
+    const ny = Math.max(250, Math.min(GY, cy + pick([0, 20, 40]))), r = cy - ny;
+    const g = Math.max(70, Math.floor(reach(r, f) * rnd(0.75, 1)));
+    ground(cx + g, cx + g + Lg, ny);
+    if (n >= 8 && R() < 0.5) {
+      const e = patrol(firstX + 120, cx - 20, 250, 70 + 20 * d, "bat"); e.ph = rnd(0, 6);
+    }
+    x = cx + g + Lg; y = ny;
+  }
+  function mover() {
+    const ow = 112, eg = Math.max(70, Math.floor(reach(0, f) * 0.72));
+    const range = Math.round(rnd(150, 230) + 50 * d), ay = d > 0.5 ? ri(0, 40) : 0;
+    const pit = 2 * eg + ow + range;
+    solids.push({x: x + eg, y, w: ow, h: 22, type: "plat", mv: {ox: x + eg, oy: y, ax: range, ay, sp: rnd(1.1, 1.4) + 0.5 * d, ph: rnd(0, 6)}});
+    ground(x + pit, x + pit + Lg, y);
+    for (let k = 0; k < 3; k++) addCoin(x + pit / 2 - 40 + k * 40, y - 100);
+    x += pit + Lg;
+  }
+  function spikeRun() {
+    const len = ri(440, 640); ground(x, x + len, y);
+    let sx = x + 120;
+    while (sx < x + len - 190) {
+      const k = ri(1, d > 0.5 ? 3 : 2);
+      for (let i = 0; i < k; i++) spikes.push({x: sx + i * 28, y: y - 18, w: 28, h: 18});
+      addCoin(sx + k * 14, y - 95);
+      sx += k * 28 + ri(150, 230);
+    }
+    x += len;
+  }
+  function tower() {
+    const s = ri(2, 3), cw = 44, tx = x + 130, total = 130 + 2 * s * cw + 130;
+    ground(x, x + total, y);
+    for (let j = 0; j < 2 * s; j++) {
+      const h = (j < s ? j + 1 : 2 * s - j) * 40;
+      solids.push({x: tx + j * cw, y: y - h, w: cw, h, type: "crate"});
+    }
+    addCoin(tx + s * cw, y - s * 40 - 30);
+    x += total;
+  }
+
+  const kinds = [["run", 3 - 2 * d], ["gap", 2 + d], ["stones", 2 + 3 * d], ["spike", d >= 0.1 ? 1 + d : 0], ["tower", 1.2],
+                 ["mover", d >= 0.25 ? 1 + 2 * d : 0], ["crumble", d >= 0.5 ? 1 + 2.5 * d : 0]];
+  let last = "";
+  while (x < LEN) {
+    let kind = "run";
+    if (!(cps < 2 && x >= LEN * (cps + 1) / 3)) {
+      const pool = kinds.filter(k => k[1] > 0 && k[0] !== last);
+      let tot = pool.reduce((a, k) => a + k[1], 0), r = R() * tot;
+      for (const k of pool) { r -= k[1]; if (r <= 0) { kind = k[0]; break; } }
+    }
+    ({run, gap, stones: () => stones("plat"), spike: spikeRun, tower, mover, crumble: () => stones("crumble")})[kind]();
+    last = kind;
+  }
+  ground(x, x + 1100, y);
+  GOALX = x + 420; WORLD = x + 1100; goalY = y;
+}
+
+function loadLevel(n) {
+  lvl = n; theme = THEMES[n - 1];
+  solids = []; coins = []; enemies = []; spikes = []; checkpoints = [];
+  if (n === 1) buildLevel1(); else genLevel(n);
+  p = {x: 60, y: GY - 44, w: 28, h: 44, vx: 0, vy: 0, ground: false, face: 1, anim: 0, on: null, sprinting: false};
+  cam = 0; lives = 3; score = scoreStart; cp = checkpoints[0]; elapsed = 0; finalT = 0; hurtT = 0; shake = 0; mt = 0; introT = 2.2;
+  enemies.forEach(e => { e.dead = 0; e.x = (e.min + e.max) / 2; });
+  dirs.l = dirs.r = false; sprint.l = sprint.r = false;
+}
 
 /* ---------- Entrada ---------- */
-const keys = {};
-let jumpBuf = 0, coyote = 0;
-addEventListener("keydown", e => {
-  if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(e.key)) e.preventDefault();
-  if (e.repeat) return;
-  keys[e.code] = true;
-  initAudio();
-  if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") {
-    if (state === "title") { state = "play"; startT = performance.now(); }
-    else if (state === "over" || state === "win") { resetGame(); state = "play"; startT = performance.now(); }
-    jumpBuf = 0.12;
-  }
-  if (e.code === "KeyR") { resetGame(); state = "play"; startT = performance.now(); }
-});
-addEventListener("keyup", e => { keys[e.code] = false; });
-const L = () => keys.ArrowLeft || keys.KeyA, R = () => keys.ArrowRight || keys.KeyD;
-const JH = () => keys.Space || keys.ArrowUp || keys.KeyW;
-/* tactil: botones en pantalla */
-function startIfNeeded() {
-  initAudio();
-  if (state === "title") { state = "play"; startT = performance.now(); }
-  else if (state === "over" || state === "win") { resetGame(); state = "play"; startT = performance.now(); }
+const dirs = {l: false, r: false}, sprint = {l: false, r: false}, lastTap = {l: -1e9, r: -1e9};
+let jumpHeld = false, jumpBuf = 0, coyote = 0;
+function press(d) {
+  const now = performance.now();
+  if (now - lastTap[d] < 350) sprint[d] = true;   /* doble toque = correr rapido */
+  lastTap[d] = now; dirs[d] = true;
 }
+function release(d) { dirs[d] = false; sprint[d] = false; }
+function action() {
+  initAudio();
+  if (stateT > 0) return;
+  if (state === "title") { scoreStart = 0; loadLevel(lvl); state = "play"; }
+  else if (state === "over") { loadLevel(lvl); state = "play"; }
+  else if (state === "win") { scoreStart = score; lvl = lvl >= TOTAL ? 1 : lvl + 1; if (lvl === 1) scoreStart = 0; loadLevel(lvl); state = "play"; }
+}
+const KDIR = {ArrowLeft: "l", KeyA: "l", ArrowRight: "r", KeyD: "r"};
+addEventListener("keydown", e => {
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(e.code)) e.preventDefault();
+  if (e.repeat) return;
+  initAudio();
+  if (KDIR[e.code]) press(KDIR[e.code]);
+  if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") {
+    jumpHeld = true; jumpBuf = 0.12;
+    if (state !== "play") action();
+  }
+  if (e.code === "KeyR" && state === "play") { loadLevel(lvl); }
+  if (e.code === "KeyN" && state !== "play") { lvl = 1; save(1); }
+});
+addEventListener("keyup", e => {
+  if (KDIR[e.code]) release(KDIR[e.code]);
+  if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") jumpHeld = false;
+});
 function bindBtn(id, onDown, onUp) {
   const el = document.getElementById(id);
   el.addEventListener("pointerdown", e => { e.preventDefault(); el.setPointerCapture(e.pointerId); el.classList.add("on"); onDown(); });
@@ -116,10 +259,10 @@ function bindBtn(id, onDown, onUp) {
   el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up); el.addEventListener("lostpointercapture", up);
   el.addEventListener("contextmenu", e => e.preventDefault());
 }
-bindBtn("bl", () => { startIfNeeded(); keys.ArrowLeft = true; }, () => { keys.ArrowLeft = false; });
-bindBtn("br", () => { startIfNeeded(); keys.ArrowRight = true; }, () => { keys.ArrowRight = false; });
-bindBtn("bj", () => { startIfNeeded(); keys.Space = true; jumpBuf = 0.12; }, () => { keys.Space = false; });
-cv.addEventListener("pointerdown", () => { if (state !== "play") startIfNeeded(); });
+bindBtn("bl", () => { if (state !== "play") action(); press("l"); }, () => release("l"));
+bindBtn("br", () => { if (state !== "play") action(); press("r"); }, () => release("r"));
+bindBtn("bj", () => { if (state !== "play") action(); jumpHeld = true; jumpBuf = 0.12; }, () => { jumpHeld = false; });
+cv.addEventListener("pointerdown", () => { if (state !== "play") action(); });
 document.addEventListener("touchmove", e => e.preventDefault(), {passive: false});
 
 /* ---------- Sonido ---------- */
@@ -139,47 +282,78 @@ const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a
 
 function die() {
   lives--; shake = 0.3; beep(220, 0.4, "sawtooth", 0.07, 60);
-  if (lives <= 0) { state = "over"; return; }
-  p.x = cp.x; p.y = GY - 60; p.vx = 0; p.vy = 0; hurtT = 1.5;
+  if (lives <= 0) { state = "over"; stateT = 0.7; return; }
+  p.x = cp.x; p.y = cp.gy - 60; p.vx = 0; p.vy = 0; p.on = null; hurtT = 1.5;
 }
 
 function update(dt) {
   if (state !== "play") return;
-  elapsed = (performance.now() - startT) / 1000;
-  const target = ((R() ? 1 : 0) - (L() ? 1 : 0)) * SPEED;
-  p.vx += (target - p.vx) * Math.min(1, dt * (p.ground ? 14 : 7));
-  if (target !== 0) p.face = Math.sign(target);
+  elapsed += dt; mt += dt; introT = Math.max(0, introT - dt);
+
+  /* plataformas moviles y que se caen */
+  for (const s of solids) {
+    if (s.mv) {
+      const m = s.mv, k = (1 + Math.sin(mt * m.sp + m.ph)) / 2;
+      const nx = m.ox + k * m.ax, ny = m.oy - k * m.ay, dx = nx - s.x, dy = ny - s.y;
+      if (p.on === s) { p.x += dx; p.y += dy; }
+      s.x = nx; s.y = ny;
+    }
+    if (s.cr) {
+      if (s.gone) { s.cr.r -= dt; if (s.cr.r <= 0) { s.gone = false; s.cr.t = -1; } }
+      else {
+        if (p.on === s && s.cr.t < 0) s.cr.t = 0.5;
+        if (s.cr.t >= 0) { s.cr.t -= dt; if (s.cr.t <= 0) { s.gone = true; s.cr.r = 2.6; if (p.on === s) p.on = null; } }
+      }
+    }
+  }
+
+  const target = ((dirs.r ? 1 : 0) - (dirs.l ? 1 : 0));
+  const fast = (target > 0 && sprint.r) || (target < 0 && sprint.l);
+  p.sprinting = fast;
+  const tv = target * SPEED * (fast ? SPRINT : 1);
+  p.vx += (tv - p.vx) * Math.min(1, dt * (p.ground ? 14 : 7));
+  if (target !== 0) p.face = target;
   jumpBuf = Math.max(0, jumpBuf - dt);
   coyote = p.ground ? 0.1 : Math.max(0, coyote - dt);
   if (jumpBuf > 0 && coyote > 0) { p.vy = -JUMP; p.ground = false; coyote = 0; jumpBuf = 0; beep(420, 0.15, "square", 0.04, 780); }
-  p.vy += GRAV * dt * ((!JH() && p.vy < 0) ? 2.1 : 1);
+  p.vy += GRAV * dt * ((!jumpHeld && p.vy < 0) ? 2.1 : 1);
   if (p.vy > 950) p.vy = 950;
 
   p.x += p.vx * dt;
-  for (const s of solids) if (hit(p, s)) { if (p.vx > 0) p.x = s.x - p.w; else if (p.vx < 0) p.x = s.x + s.w; p.vx = 0; }
+  for (const s of solids) if (!s.gone && hit(p, s)) {
+    if (p.vx > 0) p.x = s.x - p.w; else if (p.vx < 0) p.x = s.x + s.w;
+    else p.x = (p.x + p.w / 2 < s.x + s.w / 2) ? s.x - p.w : s.x + s.w;
+    p.vx = 0;
+  }
   if (p.x < 0) p.x = 0;
-  p.y += p.vy * dt; p.ground = false;
-  for (const s of solids) if (hit(p, s)) {
-    if (p.vy > 0) { p.y = s.y - p.h; p.ground = true; } else if (p.vy < 0) { p.y = s.y + s.h; beep(150, 0.08, "square", 0.04); }
+  p.y += p.vy * dt; p.ground = false; p.on = null;
+  for (const s of solids) if (!s.gone && hit(p, s)) {
+    if (p.vy > 0) { p.y = s.y - p.h; p.ground = true; p.on = s; } else if (p.vy < 0) { p.y = s.y + s.h; beep(150, 0.08, "square", 0.04); }
     p.vy = 0;
   }
   if (p.y > H + 80) die();
-  if (Math.abs(p.vx) > 20 && p.ground) p.anim += dt * 12;
+  if (Math.abs(p.vx) > 20 && p.ground) p.anim += dt * (fast ? 17 : 12);
   hurtT = Math.max(0, hurtT - dt); shake = Math.max(0, shake - dt);
 
   for (const c of coins) if (!c.got && Math.hypot(p.x + p.w / 2 - c.x, p.y + p.h / 2 - c.y) < 24) { c.got = true; score++; beep(880, 0.12, "square", 0.04, 1320); }
+  for (const sp of spikes) if (hurtT <= 0 && state === "play" && hit(p, {x: sp.x + 5, y: sp.y + 6, w: sp.w - 10, h: sp.h - 6})) { die(); break; }
   for (const e of enemies) {
+    if (state !== "play") break;
     if (e.dead) { e.dead += dt; continue; }
+    e.t += dt;
     e.x += e.dir * e.sp * dt;
     if (e.x < e.min) { e.x = e.min; e.dir = 1; }
     if (e.x + e.w > e.max) { e.x = e.max - e.w; e.dir = -1; }
+    if (e.kind === "hop") e.y = e.by - Math.abs(Math.sin(e.t * 3.4 + e.ph)) * 56;
+    else if (e.kind === "bat") e.y = e.by + Math.sin(e.t * 2.2 + e.ph) * 34;
     if (hit(p, e)) {
       if (p.vy > 0 && p.y + p.h - e.y < 22) { e.dead = 0.001; p.vy = -420; beep(300, 0.2, "square", 0.05, 100); score += 2; }
       else if (hurtT <= 0) die();
     }
   }
+  if (state !== "play") return;
   for (const k of checkpoints) if (p.x > k.x + 60 && k.x > cp.x) cp = k;
-  if (p.x > GOALX) { state = "win"; finalT = elapsed; beep(660, 0.5, "triangle", 0.06, 1320); }
+  if (p.x > GOALX) { state = "win"; stateT = 0.7; finalT = elapsed; if (lvl < TOTAL) save(lvl + 1); else save(1); beep(660, 0.5, "triangle", 0.06, 1320); }
   cam = Math.max(0, Math.min(WORLD - W, p.x - 280));
 }
 
@@ -188,20 +362,29 @@ function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
 
 function drawBackground(time) {
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, "#4fa8ff"); g.addColorStop(1, "#bfe8ff");
+  g.addColorStop(0, theme.s1); g.addColorStop(1, theme.s2);
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = "#fff6b0"; ctx.beginPath(); ctx.arc(660, 80, 36, 0, 7); ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,.85)";
+  if (theme.stars) {
+    ctx.fillStyle = "#fff";
+    for (let i = 0; i < 50; i++) {
+      const sx = (i * 97 + 13) % W, sy = (i * 53 + 7) % 250;
+      ctx.globalAlpha = 0.35 + 0.5 * Math.abs(Math.sin(time * 1.5 + i));
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+  ctx.fillStyle = theme.sun; ctx.beginPath(); ctx.arc(660, 80, 36, 0, 7); ctx.fill();
+  ctx.fillStyle = theme.cloud;
   for (let i = 0; i < 9; i++) {
     const x = ((i * 330 - cam * 0.2 - time * 8) % 3000 + 3000) % 3000 - 200;
     const y = 50 + (i * 37) % 120;
     ctx.beginPath(); ctx.ellipse(x, y, 46, 16, 0, 0, 7); ctx.ellipse(x + 30, y - 10, 34, 16, 0, 0, 7); ctx.ellipse(x - 28, y - 4, 28, 12, 0, 0, 7); ctx.fill();
   }
-  ctx.fillStyle = "#7ac9a0";
+  ctx.fillStyle = theme.h1;
   ctx.beginPath(); ctx.moveTo(0, H);
   for (let x = 0; x <= W; x += 20) ctx.lineTo(x, 300 - 40 * Math.sin((x + cam * 0.35) / 120) - 20 * Math.sin((x + cam * 0.35) / 47));
   ctx.lineTo(W, H); ctx.fill();
-  ctx.fillStyle = "#4ea87a";
+  ctx.fillStyle = theme.h2;
   ctx.beginPath(); ctx.moveTo(0, H);
   for (let x = 0; x <= W; x += 20) ctx.lineTo(x, 340 - 30 * Math.sin((x + cam * 0.6) / 90 + 2) - 12 * Math.sin((x + cam * 0.6) / 33));
   ctx.lineTo(W, H); ctx.fill();
@@ -209,24 +392,39 @@ function drawBackground(time) {
 
 function drawSolids() {
   for (const s of solids) {
-    const x = s.x - cam;
+    if (s.gone) continue;
+    let x = s.x - cam, y = s.y;
     if (x > W || x + s.w < 0) continue;
     if (s.type === "ground") {
-      ctx.fillStyle = "#8a5a35"; ctx.fillRect(x, s.y, s.w, s.h);
-      ctx.fillStyle = "#6f4627";
-      for (let k = Math.floor(Math.max(0, -x) / 40) * 40; k < Math.min(s.w, W - x); k += 40) ctx.fillRect(x + k + 8, s.y + 30 + ((k / 40) % 3) * 12, 14, 7);
-      ctx.fillStyle = "#4cc152"; ctx.fillRect(x, s.y, s.w, 12);
-      ctx.fillStyle = "#6fe070"; ctx.fillRect(x, s.y, s.w, 4);
+      ctx.fillStyle = theme.dirt; ctx.fillRect(x, y, s.w, s.h);
+      ctx.fillStyle = theme.dirt2;
+      for (let k = Math.floor(Math.max(0, -x) / 40) * 40; k < Math.min(s.w, W - x); k += 40) ctx.fillRect(x + k + 8, y + 30 + ((k / 40) % 3) * 12, 14, 7);
+      ctx.fillStyle = theme.top; ctx.fillRect(x, y, s.w, 12);
+      ctx.fillStyle = theme.hi; ctx.fillRect(x, y, s.w, 4);
     } else if (s.type === "plat") {
-      ctx.fillStyle = "#7d8aa8"; rr(x, s.y, s.w, s.h, 5); ctx.fill();
-      ctx.fillStyle = "#a6b3d1"; ctx.fillRect(x + 3, s.y + 2, s.w - 6, 5);
-      ctx.fillStyle = "#5a6684";
-      for (let k = 20; k < s.w; k += 30) ctx.fillRect(x + k, s.y + 8, 2, 12);
+      if (s.cr && s.cr.t >= 0) { x += (Math.random() - .5) * 4; y += (Math.random() - .5) * 2; }
+      const base = s.cr ? "#a5784a" : s.mv ? "#4a8fc4" : "#7d8aa8", hi = s.cr ? "#c79a68" : s.mv ? "#7cc2f0" : "#a6b3d1", lo = s.cr ? "#7a5530" : s.mv ? "#2f6a98" : "#5a6684";
+      ctx.fillStyle = base; rr(x, y, s.w, s.h, 5); ctx.fill();
+      ctx.fillStyle = hi; ctx.fillRect(x + 3, y + 2, s.w - 6, 5);
+      ctx.fillStyle = lo;
+      for (let k = 20; k < s.w; k += 30) ctx.fillRect(x + k, y + 8, 2, 12);
+      if (s.mv) { ctx.fillStyle = "#fff"; ctx.fillRect(x + s.w / 2 - 10, y + 9, 20, 3); }
     } else {
-      ctx.fillStyle = "#c58a3c"; ctx.fillRect(x, s.y, s.w, s.h);
-      ctx.strokeStyle = "#8a5a1f"; ctx.lineWidth = 3; ctx.strokeRect(x + 2, s.y + 2, s.w - 4, s.h - 4);
-      ctx.beginPath(); ctx.moveTo(x + 4, s.y + 4); ctx.lineTo(x + s.w - 4, s.y + s.h - 4); ctx.moveTo(x + s.w - 4, s.y + 4); ctx.lineTo(x + 4, s.y + s.h - 4); ctx.stroke();
+      for (let ty = 0; ty < s.h; ty += 40) for (let tx = 0; tx < s.w; tx += 40) {
+        const cw = Math.min(40, s.w - tx), ch = Math.min(40, s.h - ty);
+        ctx.fillStyle = "#c58a3c"; ctx.fillRect(x + tx, y + ty, cw, ch);
+        ctx.strokeStyle = "#8a5a1f"; ctx.lineWidth = 3; ctx.strokeRect(x + tx + 2, y + ty + 2, cw - 4, ch - 4);
+        ctx.beginPath(); ctx.moveTo(x + tx + 4, y + ty + 4); ctx.lineTo(x + tx + cw - 4, y + ty + ch - 4); ctx.moveTo(x + tx + cw - 4, y + ty + 4); ctx.lineTo(x + tx + 4, y + ty + ch - 4); ctx.stroke();
+      }
     }
+  }
+}
+
+function drawSpikes() {
+  for (const s of spikes) {
+    const x = s.x - cam; if (x > W || x + s.w < 0) continue;
+    ctx.fillStyle = "#cfd8e3"; ctx.beginPath(); ctx.moveTo(x, s.y + s.h); ctx.lineTo(x + s.w / 2, s.y); ctx.lineTo(x + s.w, s.y + s.h); ctx.fill();
+    ctx.fillStyle = "#8a97a8"; ctx.beginPath(); ctx.moveTo(x + s.w / 2, s.y); ctx.lineTo(x + s.w, s.y + s.h); ctx.lineTo(x + s.w / 2, s.y + s.h); ctx.fill();
   }
 }
 
@@ -244,10 +442,20 @@ function drawEnemy(e, time) {
   const x = e.x - cam; if (x < -50 || x > W + 50) return;
   if (e.dead) {
     if (e.dead > 0.5) return;
-    ctx.fillStyle = "#8e44ad"; rr(x, e.y + 20, e.w, 8, 4); ctx.fill(); return;
+    ctx.fillStyle = e.kind === "bat" ? "#c0392b" : e.kind === "hop" ? "#2e9e57" : "#8e44ad"; rr(x, e.y + e.h - 8, e.w, 8, 4); ctx.fill(); return;
   }
   const bob = Math.sin(time * 8 + e.x) * 2;
-  ctx.fillStyle = "#9b59d0";
+  if (e.kind === "bat") {
+    const fl = Math.sin(time * 14 + e.x) * 10;
+    ctx.fillStyle = "#8f1f2f";
+    ctx.beginPath(); ctx.moveTo(x + 17, e.y + 12); ctx.lineTo(x - 8, e.y + 2 + fl); ctx.lineTo(x + 6, e.y + 18); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 17, e.y + 12); ctx.lineTo(x + e.w + 8, e.y + 2 + fl); ctx.lineTo(x + e.w - 6, e.y + 18); ctx.fill();
+    ctx.fillStyle = "#e0455a"; ctx.beginPath(); ctx.ellipse(x + 17, e.y + 12, 13, 11, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x + 12, e.y + 10, 3.5, 0, 7); ctx.arc(x + 23, e.y + 10, 3.5, 0, 7); ctx.fill();
+    ctx.fillStyle = "#222"; ctx.beginPath(); ctx.arc(x + 12 + e.dir, e.y + 10, 1.6, 0, 7); ctx.arc(x + 23 + e.dir, e.y + 10, 1.6, 0, 7); ctx.fill();
+    return;
+  }
+  ctx.fillStyle = e.kind === "hop" ? "#3fb56a" : "#9b59d0";
   ctx.beginPath(); ctx.moveTo(x, e.y + e.h); ctx.quadraticCurveTo(x, e.y - 6 + bob, x + e.w / 2, e.y - 4 + bob); ctx.quadraticCurveTo(x + e.w, e.y - 6 + bob, x + e.w, e.y + e.h); ctx.closePath(); ctx.fill();
   ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x + 11, e.y + 10, 5, 0, 7); ctx.arc(x + 24, e.y + 10, 5, 0, 7); ctx.fill();
   ctx.fillStyle = "#222"; const d = e.dir * 1.5;
@@ -255,10 +463,10 @@ function drawEnemy(e, time) {
   ctx.strokeStyle = "#222"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x + 6, e.y + 4); ctx.lineTo(x + 14, e.y + 7); ctx.moveTo(x + 29, e.y + 4); ctx.lineTo(x + 21, e.y + 7); ctx.stroke();
 }
 
-function drawPlayer(time) {
-  if (hurtT > 0 && Math.floor(time * 14) % 2) return;
-  const x = p.x - cam, y = p.y;
-  ctx.save(); ctx.translate(x + p.w / 2, y + p.h / 2); ctx.scale(p.face, 1);
+function drawPlayer(time, dx = 0, alpha = 1) {
+  if (alpha === 1 && hurtT > 0 && Math.floor(time * 14) % 2) return;
+  const x = p.x - cam + dx, y = p.y;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(x + p.w / 2, y + p.h / 2); ctx.scale(p.face, 1);
   const run = p.ground && Math.abs(p.vx) > 20, sw = run ? Math.sin(p.anim) * 7 : 0, air = !p.ground;
   ctx.fillStyle = "#ffcc33";
   rr(-12 + sw, 14, 11, 8, 3); ctx.fill(); rr(1 - sw, 14, 11, 8, 3); ctx.fill();
@@ -276,52 +484,71 @@ function drawPlayer(time) {
 
 function drawGoal(time) {
   const x = GOALX + 60 - cam; if (x < -100 || x > W + 100) return;
-  ctx.fillStyle = "#5b6585"; ctx.beginPath(); ctx.moveTo(x - 30, GY); ctx.lineTo(x - 16, GY - 170); ctx.lineTo(x + 16, GY - 170); ctx.lineTo(x + 30, GY); ctx.fill();
-  ctx.fillStyle = "#8a96b8"; ctx.fillRect(x - 12, GY - 120, 24, 8); ctx.fillRect(x - 14, GY - 70, 28, 8);
-  const g = ctx.createRadialGradient(x, GY - 185, 4, x, GY - 185, 60 + 8 * Math.sin(time * 5));
+  ctx.fillStyle = "#5b6585"; ctx.beginPath(); ctx.moveTo(x - 30, goalY); ctx.lineTo(x - 16, goalY - 170); ctx.lineTo(x + 16, goalY - 170); ctx.lineTo(x + 30, goalY); ctx.fill();
+  ctx.fillStyle = "#8a96b8"; ctx.fillRect(x - 12, goalY - 120, 24, 8); ctx.fillRect(x - 14, goalY - 70, 28, 8);
+  const g = ctx.createRadialGradient(x, goalY - 185, 4, x, goalY - 185, 60 + 8 * Math.sin(time * 5));
   g.addColorStop(0, "rgba(255,255,200,1)"); g.addColorStop(1, "rgba(255,230,100,0)");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, GY - 185, 70, 0, 7); ctx.fill();
-  ctx.fillStyle = "#fff6b0"; ctx.beginPath(); ctx.arc(x, GY - 185, 14, 0, 7); ctx.fill();
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, goalY - 185, 70, 0, 7); ctx.fill();
+  ctx.fillStyle = "#fff6b0"; ctx.beginPath(); ctx.arc(x, goalY - 185, 14, 0, 7); ctx.fill();
 }
 
 function hud() {
   ctx.font = "bold 18px Arial"; ctx.textBaseline = "top";
-  ctx.fillStyle = "rgba(10,20,40,.55)"; rr(10, 10, 360, 34, 10); ctx.fill();
+  ctx.fillStyle = "rgba(10,20,40,.55)"; rr(10, 10, 470, 34, 10); ctx.fill();
   ctx.fillStyle = "#ffd23f"; ctx.fillText("● " + score, 24, 18);
-  ctx.fillStyle = "#ff6b81"; ctx.fillText("♥ ".repeat(Math.max(lives, 0)).trim() || "-", 110, 18);
-  ctx.fillStyle = "#fff"; ctx.fillText("Tiempo " + elapsed.toFixed(1) + " s", 220, 18);
+  ctx.fillStyle = "#ff6b81"; ctx.fillText("♥ ".repeat(Math.max(lives, 0)).trim() || "-", 100, 18);
+  ctx.fillStyle = "#fff"; ctx.fillText("Tiempo " + elapsed.toFixed(1) + " s", 200, 18);
+  ctx.fillStyle = "#7ff3ff"; ctx.fillText("Nivel " + lvl + "/" + TOTAL, 365, 18);
   const pr = Math.min(1, p.x / GOALX);
   ctx.fillStyle = "rgba(10,20,40,.55)"; rr(W - 210, 16, 190, 12, 6); ctx.fill();
   ctx.fillStyle = "#7ff3ff"; rr(W - 210, 16, 190 * pr, 12, 6); ctx.fill();
+  if (p.sprinting && state === "play") { ctx.fillStyle = "#ffe14d"; ctx.fillText("⚡ RÁPIDO", 14, 54); }
 }
 
 function banner(t1, t2, t3) {
   ctx.fillStyle = "rgba(8,14,34,.72)"; ctx.fillRect(0, 0, W, H);
-  ctx.textAlign = "center"; ctx.fillStyle = "#7ff3ff"; ctx.font = "bold 48px Arial"; ctx.fillText(t1, W / 2, 120);
-  ctx.fillStyle = "#fff"; ctx.font = "22px Arial"; ctx.fillText(t2, W / 2, 200);
-  if (t3) { ctx.fillStyle = "#ffd23f"; ctx.fillText(t3, W / 2, 245); }
+  ctx.textAlign = "center"; ctx.fillStyle = "#7ff3ff"; ctx.font = "bold 46px Arial"; ctx.fillText(t1, W / 2, 105);
+  ctx.fillStyle = "#fff"; ctx.font = "22px Arial"; ctx.fillText(t2, W / 2, 185);
+  if (t3) { ctx.fillStyle = "#ffd23f"; ctx.fillText(t3, W / 2, 232); }
   ctx.fillStyle = "#b8c4e8"; ctx.font = "16px Arial";
-  ctx.fillText("Flechas o A/D para moverte · Espacio o ↑ para saltar (mantén para saltar más alto)", W / 2, 330);
-  ctx.fillText("Salta sobre los enemigos para vencerlos · Llega a la Torre Luz", W / 2, 356);
+  ctx.fillText("Flechas o A/D para moverte · Espacio o ↑ para saltar (mantén para saltar más alto)", W / 2, 300);
+  ctx.fillText("⚡ Toca dos veces seguidas ◀ o ▶ (y mantén) para correr más rápido", W / 2, 326);
+  ctx.fillText("Salta sobre los monstruos · Evita los pinchos y los vacíos · Llega a la Torre Luz", W / 2, 352);
   ctx.textAlign = "left";
 }
 
 function draw(time) {
   ctx.save();
   if (shake > 0) ctx.translate((Math.random() - .5) * 8, (Math.random() - .5) * 8);
-  drawBackground(time); drawSolids(); drawGoal(time); drawCoins(time);
-  enemies.forEach(e => drawEnemy(e, time)); drawPlayer(time);
+  drawBackground(time); drawSolids(); drawSpikes(); drawGoal(time); drawCoins(time);
+  enemies.forEach(e => drawEnemy(e, time));
+  if (p.sprinting && state === "play") { drawPlayer(time, -16 * p.face, 0.28); drawPlayer(time, -32 * p.face, 0.14); }
+  drawPlayer(time);
   ctx.restore();
   hud();
-  if (state === "title") { ctx.textBaseline = "alphabetic"; banner("PIPO Y LA TORRE LUZ", "Ayuda a Pipo a cruzar el valle hasta la torre", "Pulsa ESPACIO para empezar"); }
-  if (state === "over") { ctx.textBaseline = "alphabetic"; banner("FIN DEL JUEGO", "Monedas: " + score, "Pulsa ESPACIO para intentarlo otra vez"); }
-  if (state === "win") { ctx.textBaseline = "alphabetic"; banner("¡LO LOGRASTE!", "Tiempo: " + finalT.toFixed(1) + " s   ·   Puntos: " + score, "Pulsa ESPACIO para jugar de nuevo"); }
+  ctx.textBaseline = "alphabetic";
+  if (state === "play" && introT > 0) {
+    ctx.globalAlpha = Math.min(1, introT); ctx.textAlign = "center";
+    ctx.fillStyle = "#fff"; ctx.font = "bold 40px Arial"; ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 5;
+    const t = "Nivel " + lvl + " · " + NAMES[lvl - 1];
+    ctx.strokeText(t, W / 2, 160); ctx.fillText(t, W / 2, 160);
+    ctx.globalAlpha = 1; ctx.textAlign = "left";
+  }
+  if (state === "title") banner("PIPO Y LA TORRE LUZ", "10 niveles de parkour · cada uno más difícil", (lvl > 1 ? "Continuar en el nivel " + lvl : "Empezar en el nivel 1") + " — pulsa ESPACIO o toca");
+  if (state === "over") banner("FIN DEL JUEGO", "Nivel " + lvl + " · Monedas: " + score, "Pulsa ESPACIO o toca para reintentar el nivel " + lvl);
+  if (state === "win") {
+    if (lvl >= TOTAL) banner("¡GANASTE EL JUEGO!", "Completaste los 10 niveles · Puntos: " + score, "Pulsa ESPACIO o toca para jugar de nuevo");
+    else banner("¡NIVEL " + lvl + " COMPLETADO!", "Tiempo: " + finalT.toFixed(1) + " s   ·   Puntos: " + score, "Pulsa ESPACIO o toca para el nivel " + (lvl + 1));
+  }
 }
 
 /* ---------- Bucle ---------- */
+lvl = loadSaved();
+loadLevel(lvl);
+state = "title";
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min(0.033, (now - last) / 1000); last = now; t0 += dt;
+  const dt = Math.min(0.033, (now - last) / 1000); last = now; t0 += dt; stateT = Math.max(0, stateT - dt);
   update(dt); draw(t0);
   requestAnimationFrame(frame);
 }
