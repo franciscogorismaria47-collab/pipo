@@ -65,6 +65,8 @@ let lvl = 1, scoreStart = 0;
 let p, cam = 0, lives = 3, score = 0, state = "title", cp, elapsed = 0, finalT = 0, hurtT = 0, shake = 0, t0 = 0, stateT = 0, introT = 0, mt = 0;
 
 function loadSaved() { try { const v = parseInt(localStorage.getItem("pipo_lvl_v2"), 10); if (v >= 1 && v <= TOTAL) return v; } catch (e) {} return 1; }
+function loadBest() { try { const v = parseInt(localStorage.getItem("pipo_best_v2"), 10); if (v >= 1 && v <= TOTAL) return v; } catch (e) {} return 1; }
+function saveBest(v) { try { if (v > loadBest()) localStorage.setItem("pipo_best_v2", String(v)); } catch (e) {} }
 function save(v) { try { localStorage.setItem("pipo_lvl_v2", String(v)); } catch (e) {} }
 
 /* ---------- Generacion de niveles ---------- */
@@ -237,13 +239,35 @@ function press(d) {
   lastTap[d] = now; dirs[d] = true;
 }
 function release(d) { dirs[d] = false; sprint[d] = false; }
-function action() {
+function startGame(n, keepScore) {
+  initAudio(); if (!keepScore) scoreStart = 0;
+  lvl = n; loadLevel(n); state = "play"; musicPlay(n);
+}
+function newGame() { save(1); startGame(1); }
+function toMenu() { lvl = loadSaved(); scoreStart = 0; loadLevel(lvl); state = "title"; stateT = 0.3; }
+function menuButtons() {
+  if (state === "title") {
+    const sv = loadSaved(), best = loadBest();
+    if (sv > 1) {
+      const bt = [{t: "CONTINUAR  ·  Nivel " + sv, fn: () => startGame(sv)}, {t: "NUEVO JUEGO  ·  desde el nivel 1", fn: newGame}];
+      if (best > sv) bt.push({t: "MI NIVEL MÁS ALTO  ·  Nivel " + best, fn: () => { save(best); startGame(best); }});
+      return bt;
+    }
+    if (best > 1) return [{t: "JUGAR  ·  desde el nivel 1", fn: newGame}, {t: "MI NIVEL MÁS ALTO  ·  Nivel " + best, fn: () => { save(best); startGame(best); }}];
+    return [{t: "JUGAR", fn: newGame}];
+  }
+  if (state === "over") return [{t: "REINTENTAR  ·  Nivel " + lvl, fn: () => startGame(lvl, true)}, {t: "MENÚ", fn: toMenu}];
+  if (state === "win") {
+    if (lvl >= TOTAL) return [{t: "JUGAR DE NUEVO", fn: newGame}, {t: "MENÚ", fn: toMenu}];
+    return [{t: "SIGUIENTE NIVEL  ·  " + (lvl + 1), fn: () => { scoreStart = score; startGame(lvl + 1, true); }}, {t: "MENÚ", fn: toMenu}];
+  }
+  return [];
+}
+let uiButtons = [];
+function action() {            /* tecla Espacio / boton saltar: primera opcion */
   initAudio();
   if (stateT > 0) return;
-  if (state === "title") { scoreStart = 0; loadLevel(lvl); state = "play"; }
-  else if (state === "over") { loadLevel(lvl); state = "play"; }
-  else if (state === "win") { scoreStart = score; lvl = lvl >= TOTAL ? 1 : lvl + 1; if (lvl === 1) scoreStart = 0; loadLevel(lvl); state = "play"; }
-  musicPlay(lvl);
+  const bt = menuButtons(); if (bt.length) bt[0].fn();
 }
 const KDIR = {ArrowLeft: "l", KeyA: "l", ArrowRight: "r", KeyD: "r"};
 addEventListener("keydown", e => {
@@ -257,7 +281,8 @@ addEventListener("keydown", e => {
   }
   if (e.code === "KeyR" && state === "play") { loadLevel(lvl); }
   if (e.code === "KeyM") setMusic(!Music.on);
-  if (e.code === "KeyN" && state !== "play") { lvl = 1; save(1); }
+  if (e.code === "KeyN" && state !== "play" && stateT <= 0) newGame();
+  if (e.code === "Escape" && state !== "play" && state !== "title" && stateT <= 0) toMenu();
 });
 addEventListener("keyup", e => {
   if (KDIR[e.code]) release(KDIR[e.code]);
@@ -270,10 +295,16 @@ function bindBtn(id, onDown, onUp) {
   el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up); el.addEventListener("lostpointercapture", up);
   el.addEventListener("contextmenu", e => e.preventDefault());
 }
-bindBtn("bl", () => { if (state !== "play") action(); press("l"); }, () => release("l"));
-bindBtn("br", () => { if (state !== "play") action(); press("r"); }, () => release("r"));
+bindBtn("bl", () => { press("l"); }, () => release("l"));
+bindBtn("br", () => { press("r"); }, () => release("r"));
 bindBtn("bj", () => { if (state !== "play") action(); jumpHeld = true; jumpBuf = 0.12; }, () => { jumpHeld = false; });
-cv.addEventListener("pointerdown", () => { if (state !== "play") action(); });
+cv.addEventListener("pointerdown", e => {
+  if (state === "play") return;
+  initAudio();
+  if (stateT > 0) return;
+  const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
+  for (const b of uiButtons) if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { b.fn(); return; }
+});
 document.addEventListener("touchmove", e => e.preventDefault(), {passive: false});
 
 /* ---------- Sonido ---------- */
@@ -428,7 +459,7 @@ function update(dt) {
   }
   if (state !== "play") return;
   for (const k of checkpoints) if (p.x > k.x + 60 && k.x > cp.x) cp = k;
-  if (p.x > GOALX) { state = "win"; stateT = 0.7; finalT = elapsed; if (lvl < TOTAL) save(lvl + 1); else save(1); beep(660, 0.5, "triangle", 0.06, 1320); }
+  if (p.x > GOALX) { state = "win"; stateT = 0.7; finalT = elapsed; if (lvl < TOTAL) { save(lvl + 1); saveBest(lvl + 1); } else { save(1); saveBest(TOTAL); } beep(660, 0.5, "triangle", 0.06, 1320); }
   cam = Math.max(0, Math.min(WORLD - W, p.x - 280));
 }
 
@@ -587,15 +618,21 @@ function hud() {
   if (p.sprinting && state === "play") { ctx.fillStyle = "#ffe14d"; ctx.fillText("⚡ RÁPIDO", 14, 54); }
 }
 
-function banner(t1, t2, t3) {
-  ctx.fillStyle = "rgba(8,14,34,.72)"; ctx.fillRect(0, 0, W, H);
-  ctx.textAlign = "center"; ctx.fillStyle = "#7ff3ff"; ctx.font = "bold 46px Arial"; ctx.fillText(t1, W / 2, 105);
-  ctx.fillStyle = "#fff"; ctx.font = "22px Arial"; ctx.fillText(t2, W / 2, 185);
-  if (t3) { ctx.fillStyle = "#ffd23f"; ctx.fillText(t3, W / 2, 232); }
-  ctx.fillStyle = "#b8c4e8"; ctx.font = "16px Arial";
-  ctx.fillText("Flechas o A/D para moverte · Espacio o ↑ para saltar (mantén para saltar más alto)", W / 2, 300);
-  ctx.fillText("⚡ Toca dos veces seguidas ◀ o ▶ (y mantén) para correr más rápido", W / 2, 326);
-  ctx.fillText("Salta sobre los monstruos · Evita los pinchos y los vacíos · Llega a la Torre Luz", W / 2, 352);
+function banner(t1, t2) {
+  ctx.fillStyle = "rgba(8,14,34,.78)"; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = "center"; ctx.fillStyle = "#7ff3ff"; ctx.font = "bold 44px Arial"; ctx.fillText(t1, W / 2, 78);
+  ctx.fillStyle = "#fff"; ctx.font = "20px Arial"; ctx.fillText(t2, W / 2, 118);
+  const bt = menuButtons(); uiButtons = [];
+  const bw = 380, bh = 48, gap = 12, y0 = 142;
+  bt.forEach((b, i) => {
+    const x = (W - bw) / 2, y = y0 + i * (bh + gap);
+    ctx.fillStyle = i === 0 ? "#ffd23f" : "rgba(127,243,255,.9)"; rr(x, y, bw, bh, 14); ctx.fill();
+    ctx.fillStyle = "#0b0f1f"; ctx.font = "bold 21px Arial"; ctx.fillText(b.t, W / 2, y + 31);
+    uiButtons.push({x, y, w: bw, h: bh, fn: b.fn});
+  });
+  ctx.fillStyle = "#b8c4e8"; ctx.font = "14px Arial";
+  ["Moverte: flechas o A/D  ·  Saltar: Espacio o ↑", "⚡ Doble toque en ◀ ▶ (y mantén) = correr rápido", "Salta sobre los monstruos (menos el de pinchos)", "Teclado: Espacio = primera opción  ·  N = juego nuevo"]
+    .forEach((t, i) => ctx.fillText(t, W / 2, 372 + i * 20));
   ctx.textAlign = "left";
 }
 
@@ -618,11 +655,12 @@ function draw(time) {
     if (nm) { ctx.font = "bold 22px Arial"; ctx.lineWidth = 4; ctx.fillStyle = "#ffe14d"; ctx.strokeText(nm, W / 2, 200); ctx.fillText(nm, W / 2, 200); }
     ctx.globalAlpha = 1; ctx.textAlign = "left";
   }
-  if (state === "title") banner("PIPO Y LA TORRE LUZ", "10 niveles de parkour · cada uno más difícil", (lvl > 1 ? "Continuar en el nivel " + lvl : "Empezar en el nivel 1") + " — pulsa ESPACIO o toca");
-  if (state === "over") banner("FIN DEL JUEGO", "Nivel " + lvl + " · Monedas: " + score, "Pulsa ESPACIO o toca para reintentar el nivel " + lvl);
+  uiButtons = state === "play" ? [] : uiButtons;
+  if (state === "title") banner("PIPO Y LA TORRE LUZ", "10 niveles de parkour · cada uno más difícil");
+  if (state === "over") banner("FIN DEL JUEGO", "Nivel " + lvl + " · Monedas: " + score);
   if (state === "win") {
-    if (lvl >= TOTAL) banner("¡GANASTE EL JUEGO!", "Completaste los 10 niveles · Puntos: " + score, "Pulsa ESPACIO o toca para jugar de nuevo");
-    else banner("¡NIVEL " + lvl + " COMPLETADO!", "Tiempo: " + finalT.toFixed(1) + " s   ·   Puntos: " + score, "Pulsa ESPACIO o toca para el nivel " + (lvl + 1));
+    if (lvl >= TOTAL) banner("¡GANASTE EL JUEGO!", "Completaste los 10 niveles · Puntos: " + score);
+    else banner("¡NIVEL " + lvl + " COMPLETADO!", "Tiempo: " + finalT.toFixed(1) + " s   ·   Puntos: " + score);
   }
 }
 
