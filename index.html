@@ -23,6 +23,7 @@
   .btn.on { background: rgba(127,243,255,.55); }
   #bj { width: 92px; height: 92px; font-size: 17px; letter-spacing: 1px; }
   @media (pointer: coarse) { .pad { display: flex; } }
+  #mus { position: fixed; top: max(44px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: 40px; height: 40px; border-radius: 50%; background: rgba(10,20,40,.55); border: 2px solid rgba(255,255,255,.55); color: #fff; font: bold 20px Arial, sans-serif; display: flex; align-items: center; justify-content: center; z-index: 4; touch-action: none; -webkit-user-select: none; user-select: none; }
   #rot { position: fixed; inset: 0; background: rgba(8,14,34,.92); color: #fff; font: bold 22px Arial, sans-serif; display: none;
          align-items: center; justify-content: center; text-align: center; padding: 24px; z-index: 5; }
   @media (orientation: portrait) and (pointer: coarse) { #rot { display: flex; } }
@@ -32,6 +33,7 @@
 <canvas id="c" width="800" height="450"></canvas>
 <div class="pad" id="padL"><div class="btn" id="bl">&#9664;</div><div class="btn" id="br">&#9654;</div></div>
 <div class="pad" id="padR"><div class="btn" id="bj">SALTAR</div></div>
+<div id="mus" title="Música (M)">♪</div>
 <div id="rot">Gira el celular en horizontal para jugar</div>
 <script>
 "use strict";
@@ -41,6 +43,7 @@ const W = 800, H = 450, GY = 370, TOTAL = 10;
 const SPEED = 280, SPRINT = 1.65, GRAV = 1700, JUMP = 640;
 
 /* ---------- Temas por nivel ---------- */
+const NEWMON = {4: "Nuevo: monstruo verde que salta", 5: "Nuevo: monstruo rojo con pinchos (¡no lo pises!)", 6: "Nuevo: murciélago volador", 7: "Nuevo: monstruo naranja que embiste"};
 const NAMES = ["El Valle", "Las Colinas", "Atardecer", "Crepúsculo", "Noche Larga", "Hielo", "Volcán", "El Abismo", "Tormenta", "La Torre Final"];
 const THEMES = [
   {s1: "#4fa8ff", s2: "#bfe8ff", h1: "#7ac9a0", h2: "#4ea87a", top: "#4cc152", hi: "#6fe070", dirt: "#8a5a35", dirt2: "#6f4627", sun: "#fff6b0", cloud: "rgba(255,255,255,.85)"},
@@ -123,10 +126,16 @@ function genLevel(n) {
   function run() {
     const len = ri(320, 620); ground(x, x + len, y);
     if (cps < 2 && x >= LEN * (cps + 1) / 3) { checkpoints.push({x: x + 50, gy: y}); cps++; }
-    const a = x + 70, b = x + len - 40;
+    const a = x + 70, b = x + len - 90;
     if (b - a >= 170 && R() < 0.55 + 0.4 * d) {
-      const kind = (d >= 0.3 && R() < d + 0.15) ? "hop" : "walk";
-      const e = patrol(a, b, y, 60 + 55 * d, kind); e.ph = rnd(0, 6);
+      const avail = ["walk"]; if (n >= 4) avail.push("hop"); if (n >= 5) avail.push("spiky"); if (n >= 7) avail.push("charger");
+      const newest = avail[avail.length - 1];
+      const pk = () => (n >= 4 && R() < 0.4) ? newest : pick(avail);
+      const mk = (aa, bb, kind) => { const e = patrol(aa, bb, y, kind === "charger" ? 50 : 60 + 55 * d, kind); e.ph = rnd(0, 6); };
+      if (n >= 4 && b - a >= 420 && R() < 0.55) {
+        const m = (a + b) / 2, k1 = pk(); let k2 = pk(); if (k2 === k1 && avail.length > 1) k2 = pick(avail.filter(k => k !== k1));
+        mk(a, m - 20, k1); mk(m + 20, b, k2);
+      } else mk(a, b, pk());
     }
     for (let k = 0; k < 4; k++) addCoin(x + 90 + k * 44, y - 50);
     x += len;
@@ -156,7 +165,7 @@ function genLevel(n) {
     const ny = Math.max(250, Math.min(GY, cy + pick([0, 20, 40]))), r = cy - ny;
     const g = Math.max(70, Math.floor(reach(r, f) * rnd(0.75, 1)));
     ground(cx + g, cx + g + Lg, ny);
-    if (n >= 8 && R() < 0.5) {
+    if (n >= 6 && R() < 0.5) {
       const e = patrol(firstX + 120, cx - 20, 250, 70 + 20 * d, "bat"); e.ph = rnd(0, 6);
     }
     x = cx + g + Lg; y = ny;
@@ -234,6 +243,7 @@ function action() {
   if (state === "title") { scoreStart = 0; loadLevel(lvl); state = "play"; }
   else if (state === "over") { loadLevel(lvl); state = "play"; }
   else if (state === "win") { scoreStart = score; lvl = lvl >= TOTAL ? 1 : lvl + 1; if (lvl === 1) scoreStart = 0; loadLevel(lvl); state = "play"; }
+  musicPlay(lvl);
 }
 const KDIR = {ArrowLeft: "l", KeyA: "l", ArrowRight: "r", KeyD: "r"};
 addEventListener("keydown", e => {
@@ -246,6 +256,7 @@ addEventListener("keydown", e => {
     if (state !== "play") action();
   }
   if (e.code === "KeyR" && state === "play") { loadLevel(lvl); }
+  if (e.code === "KeyM") setMusic(!Music.on);
   if (e.code === "KeyN" && state !== "play") { lvl = 1; save(1); }
 });
 addEventListener("keyup", e => {
@@ -267,7 +278,7 @@ document.addEventListener("touchmove", e => e.preventDefault(), {passive: false}
 
 /* ---------- Sonido ---------- */
 let actx = null;
-function initAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } }
+function initAudio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (actx && actx.state === "suspended") actx.resume(); }
 function beep(f, d, type = "square", v = 0.05, f2 = null) {
   if (!actx) return;
   const o = actx.createOscillator(), g = actx.createGain();
@@ -276,6 +287,64 @@ function beep(f, d, type = "square", v = 0.05, f2 = null) {
   g.gain.value = v; g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + d);
   o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + d);
 }
+
+/* ---------- Musica (compuesta con codigo, original, sin copyright) ---------- */
+const TRACKS = [
+  {bpm: 128, bass: [36, 33, 41, 43], wave: "square", mel: [
+    72,0,76,0,79,76,72,0,  69,0,72,0,76,72,69,0,  65,0,69,0,72,69,65,0,  67,71,74,0,71,67,74,0]},
+  {bpm: 140, bass: [38, 34, 36, 33], wave: "square", mel: [
+    74,0,77,81,77,0,74,0,  70,0,74,77,74,0,70,0,  72,0,76,79,76,0,72,0,  69,0,72,76,81,76,72,0]},
+  {bpm: 150, bass: [33, 29, 31, 28], wave: "sawtooth", mel: [
+    76,0,72,0,69,0,72,76,  77,0,72,0,69,0,72,77,  74,0,71,0,67,0,71,74,  76,0,71,68,71,0,68,0]}
+];
+const Music = {on: true, gain: null, timer: null, tr: null, step: 0, next: 0, noise: null};
+try { if (localStorage.getItem("pipo_music") === "0") Music.on = false; } catch (e) {}
+const mf = m => 440 * Math.pow(2, (m - 69) / 12);
+function tone(freq, t, dur, type, vol) {
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(Music.gain); o.start(t); o.stop(t + dur + 0.02);
+}
+function drum(t, kick) {
+  if (kick) {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+    g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    o.connect(g); g.connect(Music.gain); o.start(t); o.stop(t + 0.16);
+  } else {
+    if (!Music.noise) { const b = actx.createBuffer(1, 2205, 22050); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; Music.noise = b; }
+    const s = actx.createBufferSource(), g = actx.createGain(), f = actx.createBiquadFilter();
+    s.buffer = Music.noise; f.type = "highpass"; f.frequency.value = 6000;
+    g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    s.connect(f); f.connect(g); g.connect(Music.gain); s.start(t);
+  }
+}
+function musicStep() {
+  const T = Music.tr, i = Music.step % 32, t = Music.next, sd = 60 / T.bpm / 2;
+  const m = T.mel[i]; if (m) tone(mf(m), t, sd * 1.6, T.wave, 0.05);
+  if (i % 4 === 0) tone(mf(T.bass[Math.floor(i / 8)]), t, sd * 3.6, "triangle", 0.16);
+  if (i % 8 === 0 || i % 8 === 4) drum(t, true); else if (i % 2 === 1) drum(t, false);
+  Music.step++; Music.next += sd;
+}
+function musicTick() { if (!actx) return; while (Music.next < actx.currentTime + 0.35) musicStep(); }
+function musicStop() { if (Music.timer) { clearInterval(Music.timer); Music.timer = null; } }
+function musicPlay(level) {
+  if (!actx || !Music.on) return;
+  if (!Music.gain) { Music.gain = actx.createGain(); Music.gain.gain.value = 0.35; Music.gain.connect(actx.destination); }
+  const tr = TRACKS[level <= 3 ? 0 : level <= 7 ? 1 : 2];
+  if (Music.tr === tr && Music.timer) return;
+  musicStop(); Music.tr = tr; Music.step = 0; Music.next = actx.currentTime + 0.08;
+  Music.timer = setInterval(musicTick, 100);
+}
+function setMusic(on) {
+  Music.on = on; try { localStorage.setItem("pipo_music", on ? "1" : "0"); } catch (e) {}
+  document.getElementById("mus").textContent = on ? "♪" : "✕";
+  if (on) { initAudio(); musicPlay(lvl); } else { musicStop(); Music.tr = null; }
+}
+document.getElementById("mus").addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); setMusic(!Music.on); });
+document.getElementById("mus").textContent = Music.on ? "♪" : "✕";
+document.addEventListener("visibilitychange", () => { if (!actx) return; if (document.hidden) actx.suspend(); else actx.resume(); });
 
 /* ---------- Fisica ---------- */
 const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -341,13 +410,19 @@ function update(dt) {
     if (state !== "play") break;
     if (e.dead) { e.dead += dt; continue; }
     e.t += dt;
-    e.x += e.dir * e.sp * dt;
+    let spd = e.sp;
+    if (e.kind === "charger") {
+      const pc = p.x + p.w / 2, ec = e.x + e.w / 2;
+      e.cs = (Math.abs(pc - ec) < 260 && Math.abs((p.y + p.h) - (e.by + e.h)) < 40 && pc > e.min - 40 && pc < e.max + 40) ? 175 : 0;
+      if (e.cs) { e.dir = pc > ec ? 1 : -1; spd = e.cs; }
+    }
+    e.x += e.dir * spd * dt;
     if (e.x < e.min) { e.x = e.min; e.dir = 1; }
     if (e.x + e.w > e.max) { e.x = e.max - e.w; e.dir = -1; }
     if (e.kind === "hop") e.y = e.by - Math.abs(Math.sin(e.t * 3.4 + e.ph)) * 56;
     else if (e.kind === "bat") e.y = e.by + Math.sin(e.t * 2.2 + e.ph) * 34;
     if (hit(p, e)) {
-      if (p.vy > 0 && p.y + p.h - e.y < 22) { e.dead = 0.001; p.vy = -420; beep(300, 0.2, "square", 0.05, 100); score += 2; }
+      if (e.kind !== "spiky" && p.vy > 0 && p.y + p.h - e.y < 22) { e.dead = 0.001; p.vy = -420; beep(300, 0.2, "square", 0.05, 100); score += 2; }
       else if (hurtT <= 0) die();
     }
   }
@@ -442,7 +517,7 @@ function drawEnemy(e, time) {
   const x = e.x - cam; if (x < -50 || x > W + 50) return;
   if (e.dead) {
     if (e.dead > 0.5) return;
-    ctx.fillStyle = e.kind === "bat" ? "#c0392b" : e.kind === "hop" ? "#2e9e57" : "#8e44ad"; rr(x, e.y + e.h - 8, e.w, 8, 4); ctx.fill(); return;
+    ctx.fillStyle = e.kind === "bat" ? "#c0392b" : e.kind === "hop" ? "#2e9e57" : e.kind === "charger" ? "#c9781a" : "#8e44ad"; rr(x, e.y + e.h - 8, e.w, 8, 4); ctx.fill(); return;
   }
   const bob = Math.sin(time * 8 + e.x) * 2;
   if (e.kind === "bat") {
@@ -455,7 +530,14 @@ function drawEnemy(e, time) {
     ctx.fillStyle = "#222"; ctx.beginPath(); ctx.arc(x + 12 + e.dir, e.y + 10, 1.6, 0, 7); ctx.arc(x + 23 + e.dir, e.y + 10, 1.6, 0, 7); ctx.fill();
     return;
   }
-  ctx.fillStyle = e.kind === "hop" ? "#3fb56a" : "#9b59d0";
+  if (e.kind === "spiky") {
+    ctx.fillStyle = "#f2f2f2";
+    for (let k = 0; k < 4; k++) { const sx = x + 3 + k * 8; ctx.beginPath(); ctx.moveTo(sx, e.y + 2 + bob); ctx.lineTo(sx + 4, e.y - 12 + bob); ctx.lineTo(sx + 8, e.y + 2 + bob); ctx.fill(); }
+  }
+  if (e.kind === "charger") {
+    ctx.fillStyle = "#fff2c0"; ctx.beginPath(); ctx.moveTo(x + e.w / 2 - 4, e.y - 2 + bob); ctx.lineTo(x + e.w / 2, e.y - 14 + bob); ctx.lineTo(x + e.w / 2 + 4, e.y - 2 + bob); ctx.fill();
+  }
+  ctx.fillStyle = e.kind === "hop" ? "#3fb56a" : e.kind === "spiky" ? "#d6453d" : e.kind === "charger" ? (e.cs ? "#ff5a1f" : "#f0a030") : "#9b59d0";
   ctx.beginPath(); ctx.moveTo(x, e.y + e.h); ctx.quadraticCurveTo(x, e.y - 6 + bob, x + e.w / 2, e.y - 4 + bob); ctx.quadraticCurveTo(x + e.w, e.y - 6 + bob, x + e.w, e.y + e.h); ctx.closePath(); ctx.fill();
   ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x + 11, e.y + 10, 5, 0, 7); ctx.arc(x + 24, e.y + 10, 5, 0, 7); ctx.fill();
   ctx.fillStyle = "#222"; const d = e.dir * 1.5;
@@ -532,6 +614,8 @@ function draw(time) {
     ctx.fillStyle = "#fff"; ctx.font = "bold 40px Arial"; ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 5;
     const t = "Nivel " + lvl + " · " + NAMES[lvl - 1];
     ctx.strokeText(t, W / 2, 160); ctx.fillText(t, W / 2, 160);
+    const nm = NEWMON[lvl];
+    if (nm) { ctx.font = "bold 22px Arial"; ctx.lineWidth = 4; ctx.fillStyle = "#ffe14d"; ctx.strokeText(nm, W / 2, 200); ctx.fillText(nm, W / 2, 200); }
     ctx.globalAlpha = 1; ctx.textAlign = "left";
   }
   if (state === "title") banner("PIPO Y LA TORRE LUZ", "10 niveles de parkour · cada uno más difícil", (lvl > 1 ? "Continuar en el nivel " + lvl : "Empezar en el nivel 1") + " — pulsa ESPACIO o toca");
