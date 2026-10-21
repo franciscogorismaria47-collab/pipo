@@ -2,10 +2,9 @@
   "name": "Pipo y la Torre Luz",
   "short_name": "Pipo",
   "description": "Plataformero original: corre, salta y llega a la Torre Luz.",
-  "start_url": "./",
+  "start_url": "./?pipo=1",
   "scope": "./",
-  "display": "fullscreen",
-  "orientation": "landscape",
+  "display": "standalone",
   "background_color": "#0b0f1f",
   "theme_color": "#0b0f1f",
   "lang": "es",
@@ -28,5 +27,10 @@
       "type": "image/png",
       "purpose": "maskable"
     }
+  ],
+  "id": "./?pipo=1",
+  "display_override": [
+    "fullscreen",
+    "standalone"
   ]
 }
