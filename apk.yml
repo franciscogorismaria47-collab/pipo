@@ -1,0 +1,122 @@
+name: Construir APK de Pipo
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Preparar proyecto Android (Capacitor)
+        run: |
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y imagemagick >/dev/null
+          mkdir -p /tmp/app && cd /tmp/app
+          npm init -y >/dev/null
+          npm i @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          mkdir www
+          cp "$GITHUB_WORKSPACE"/index.html "$GITHUB_WORKSPACE"/manifest.webmanifest "$GITHUB_WORKSPACE"/icon-*.png www/
+          sed -i "s/if ('serviceWorker' in navigator).*$//" www/index.html
+          npx cap init "Pipo" com.franchi.pipo --web-dir www
+          npx cap add android
+          npx cap sync android
+
+      - name: Personalizar app (horizontal, pantalla completa, icono, presentacion)
+        run: |
+          cd /tmp/app
+          python3 - <<'PY'
+          import re, pathlib
+          base = pathlib.Path("android/app/src/main")
+          m = base / "AndroidManifest.xml"
+          t = m.read_text()
+          t = t.replace('android:launchMode="singleTask"', 'android:launchMode="singleTask" android:screenOrientation="sensorLandscape"', 1)
+          m.write_text(t)
+          s = base / "res/values/styles.xml"
+          t = s.read_text()
+          t = t.replace('<item name="android:background">@drawable/splash</item>',
+                        '<item name="android:background">@drawable/splash</item>\n        <item name="windowSplashScreenBackground">#0b0f1f</item>', 1)
+          s.write_text(t)
+          (base / "res/values/ic_launcher_background.xml").write_text(
+              '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">#0b0f1f</color>\n</resources>\n')
+          act = base / "java/com/franchi/pipo/MainActivity.java"
+          act.write_text("""package com.franchi.pipo;
+
+          import android.os.Bundle;
+          import android.view.View;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  hideBars();
+              }
+              @Override
+              public void onWindowFocusChanged(boolean hasFocus) {
+                  super.onWindowFocusChanged(hasFocus);
+                  if (hasFocus) hideBars();
+              }
+              private void hideBars() {
+                  getWindow().getDecorView().setSystemUiVisibility(
+                      View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                      | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                      | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                      | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                      | View.SYSTEM_UI_FLAG_FULLSCREEN
+                      | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+              }
+          }
+          """)
+          PY
+          RES=android/app/src/main/res
+          for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            n=${d%%:*}; s=${d##*:}
+            convert www/icon-192.png -resize ${s}x${s} $RES/mipmap-$n/ic_launcher.png
+            cp $RES/mipmap-$n/ic_launcher.png $RES/mipmap-$n/ic_launcher_round.png
+          done
+          for d in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
+            n=${d%%:*}; s=${d##*:}; k=$(( s * 60 / 100 ))
+            convert www/icon-512.png -resize ${k}x${k} -background none -gravity center -extent ${s}x${s} $RES/mipmap-$n/ic_launcher_foreground.png
+          done
+          for f in $(find $RES -name 'splash.png'); do
+            sz=$(identify -format "%wx%h" $f); w=${sz%x*}; h=${sz#*x}
+            mn=$(( w < h ? w : h )); k=$(( mn * 35 / 100 ))
+            convert -size $sz xc:'#0b0f1f' \( www/icon-512.png -resize ${k}x${k} \) -gravity center -composite $f
+          done
+
+      - name: Construir APK
+        run: |
+          cd /tmp/app/android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/Pipo.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Pipo-apk
+          path: Pipo.apk
+
+      - name: Publicar APK en Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Pipo APK ${{ github.run_number }}
+          body: Descarga Pipo.apk en el celular e instálalo.
+          files: Pipo.apk
