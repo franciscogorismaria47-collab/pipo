@@ -21,6 +21,7 @@
          color: #fff; font: bold 32px Arial, sans-serif; display: flex; align-items: center; justify-content: center;
          touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; backdrop-filter: blur(2px); }
   .btn.on { background: rgba(127,243,255,.55); }
+  #bf { visibility: hidden; background: rgba(255,80,120,.4); font-size: 14px; letter-spacing: 1px; }
   #bj { width: 92px; height: 92px; font-size: 17px; letter-spacing: 1px; }
   @media (pointer: coarse) { .pad { display: flex; } }
   #mus { position: fixed; top: max(44px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: 40px; height: 40px; border-radius: 50%; background: rgba(10,20,40,.55); border: 2px solid rgba(255,255,255,.55); color: #fff; font: bold 20px Arial, sans-serif; display: flex; align-items: center; justify-content: center; z-index: 4; touch-action: none; -webkit-user-select: none; user-select: none; }
@@ -32,7 +33,7 @@
 <body>
 <canvas id="c" width="800" height="450"></canvas>
 <div class="pad" id="padL"><div class="btn" id="bl">&#9664;</div><div class="btn" id="br">&#9654;</div></div>
-<div class="pad" id="padR"><div class="btn" id="bj">SALTAR</div></div>
+<div class="pad" id="padR"><div class="btn" id="bf">LÁSER</div><div class="btn" id="bj">SALTAR</div></div>
 <div id="mus" title="Música (M)">♪</div>
 <div id="rot">Gira el celular en horizontal para jugar</div>
 <script>
@@ -43,7 +44,7 @@ const W = 800, H = 450, GY = 370, TOTAL = 10;
 const SPEED = 280, SPRINT = 1.65, GRAV = 1700, JUMP = 640;
 
 /* ---------- Temas por nivel ---------- */
-const NEWMON = {4: "Nuevo: monstruo verde que salta", 5: "Nuevo: monstruo rojo con pinchos (¡no lo pises!)", 6: "Nuevo: murciélago volador", 7: "Nuevo: monstruo naranja que embiste"};
+const NEWMON = {1: "Nuevo: salta para agarrar poderes (láser y escudo)", 4: "Nuevo: monstruo verde que salta", 5: "Nuevo: monstruo rojo con pinchos (¡no lo pises!)", 6: "Nuevo: murciélago volador", 7: "Nuevo: monstruo naranja que embiste"};
 const NAMES = ["El Valle", "Las Colinas", "Atardecer", "Crepúsculo", "Noche Larga", "Hielo", "Volcán", "El Abismo", "Tormenta", "La Torre Final"];
 const THEMES = [
   {s1: "#4fa8ff", s2: "#bfe8ff", h1: "#7ac9a0", h2: "#4ea87a", top: "#4cc152", hi: "#6fe070", dirt: "#8a5a35", dirt2: "#6f4627", sun: "#fff6b0", cloud: "rgba(255,255,255,.85)"},
@@ -59,7 +60,8 @@ const THEMES = [
 ];
 
 /* ---------- Estado del nivel ---------- */
-let solids = [], coins = [], enemies = [], spikes = [], checkpoints = [];
+let solids = [], coins = [], enemies = [], spikes = [], checkpoints = [], powerups = [], beams = [];
+let shootCd = 0;
 let WORLD = 11500, GOALX = 11280, goalY = GY, theme = THEMES[0];
 let lvl = 1, scoreStart = 0;
 let p, cam = 0, lives = 3, score = 0, state = "title", cp, elapsed = 0, finalT = 0, hurtT = 0, shake = 0, t0 = 0, stateT = 0, introT = 0, mt = 0;
@@ -220,11 +222,40 @@ function genLevel(n) {
   GOALX = x + 420; WORLD = x + 1100; goalY = y;
 }
 
+/* poderes: flotan en el aire, hay que saltar para agarrarlos */
+function placePowerups(n) {
+  const fr = n === 1 ? [0.38, 0.72] : [0.2, 0.4, 0.6, 0.8];
+  const R = rng(n * 104729 + 7);
+  fr.forEach((f, i) => {
+    const tx = f * GOALX;
+    let best = null;
+    for (const s of solids) {
+      if (s.type !== "ground" || s.mv || s.cr || s.w < 220) continue;
+      const a = s.x + 70, b = s.x + s.w - 70;
+      if (b < a) continue;
+      const cx = Math.max(a, Math.min(b, tx));
+      const dist = Math.abs(cx - tx);
+      if (!best || dist < best.dist) best = {s, cx, dist};
+    }
+    if (best) powerups.push({x: best.cx, y: best.s.y - 88, kind: (i + Math.floor(R() * 2)) % 2 === 0 ? "laser" : "shield", got: false});
+  });
+}
+function hurt() {
+  if (p.shield) { p.shield = false; hurtT = 1.0; shake = 0.15; beep(500, 0.25, "triangle", 0.06, 150); return; }
+  die();
+}
+function shoot() {
+  if (state !== "play" || p.laser <= 0 || shootCd > 0) return;
+  shootCd = 0.22;
+  beams.push({x: p.x + p.w / 2 + p.face * 14, y: p.y + 30, dir: p.face, life: 0.9});
+  beep(1100, 0.12, "sawtooth", 0.04, 300);
+}
 function loadLevel(n) {
   lvl = n; theme = THEMES[n - 1];
-  solids = []; coins = []; enemies = []; spikes = []; checkpoints = [];
+  solids = []; coins = []; enemies = []; spikes = []; checkpoints = []; powerups = []; beams = []; shootCd = 0;
   if (n === 1) buildLevel1(); else genLevel(n);
-  p = {x: 60, y: GY - 44, w: 28, h: 44, vx: 0, vy: 0, ground: false, face: 1, anim: 0, on: null, sprinting: false};
+  placePowerups(n);
+  p = {x: 60, y: GY - 44, w: 28, h: 44, vx: 0, vy: 0, ground: false, face: 1, anim: 0, on: null, sprinting: false, laser: 0, shield: false};
   cam = 0; lives = 3; score = scoreStart; cp = checkpoints[0]; elapsed = 0; finalT = 0; hurtT = 0; shake = 0; mt = 0; introT = 2.2;
   enemies.forEach(e => { e.dead = 0; e.x = (e.min + e.max) / 2; });
   dirs.l = dirs.r = false; sprint.l = sprint.r = false;
@@ -281,6 +312,7 @@ addEventListener("keydown", e => {
   }
   if (e.code === "KeyR" && state === "play") { loadLevel(lvl); }
   if (e.code === "KeyM") setMusic(!Music.on);
+  if (e.code === "KeyX" || e.code === "KeyF" || e.code === "KeyJ" || e.code === "Enter") shoot();
   if (e.code === "KeyN" && state !== "play" && stateT <= 0) newGame();
   if (e.code === "Escape" && state !== "play" && state !== "title" && stateT <= 0) toMenu();
 });
@@ -297,6 +329,7 @@ function bindBtn(id, onDown, onUp) {
 }
 bindBtn("bl", () => { press("l"); }, () => release("l"));
 bindBtn("br", () => { press("r"); }, () => release("r"));
+bindBtn("bf", () => { shoot(); }, () => {});
 bindBtn("bj", () => { if (state !== "play") action(); jumpHeld = true; jumpBuf = 0.12; }, () => { jumpHeld = false; });
 cv.addEventListener("pointerdown", e => {
   if (state === "play") return;
@@ -383,7 +416,7 @@ const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a
 function die() {
   lives--; shake = 0.3; beep(220, 0.4, "sawtooth", 0.07, 60);
   if (lives <= 0) { state = "over"; stateT = 0.7; return; }
-  p.x = cp.x; p.y = cp.gy - 60; p.vx = 0; p.vy = 0; p.on = null; hurtT = 1.5;
+  p.x = cp.x; p.y = cp.gy - 60; p.vx = 0; p.vy = 0; p.on = null; hurtT = 1.5; p.laser = 0; p.shield = false; beams = [];
 }
 
 function update(dt) {
@@ -436,7 +469,19 @@ function update(dt) {
   hurtT = Math.max(0, hurtT - dt); shake = Math.max(0, shake - dt);
 
   for (const c of coins) if (!c.got && Math.hypot(p.x + p.w / 2 - c.x, p.y + p.h / 2 - c.y) < 24) { c.got = true; score++; beep(880, 0.12, "square", 0.04, 1320); }
-  for (const sp of spikes) if (hurtT <= 0 && state === "play" && hit(p, {x: sp.x + 5, y: sp.y + 6, w: sp.w - 10, h: sp.h - 6})) { die(); break; }
+  for (const u of powerups) if (!u.got && Math.hypot(p.x + p.w / 2 - u.x, p.y + p.h / 2 - u.y) < 30) {
+    u.got = true; score += 3;
+    if (u.kind === "laser") { p.laser = 14; beep(660, 0.3, "triangle", 0.06, 1500); } else { p.shield = true; beep(440, 0.3, "triangle", 0.06, 990); }
+  }
+  p.laser = Math.max(0, p.laser - dt); shootCd = Math.max(0, shootCd - dt);
+  for (const b of beams) {
+    b.x += b.dir * 760 * dt; b.life -= dt;
+    const br = {x: b.dir > 0 ? b.x - 26 : b.x, y: b.y - 12, w: 26, h: 24};
+    for (const s of solids) if (!s.gone && hit(br, s)) { b.life = 0; break; }
+    for (const e of enemies) if (!e.dead && hit(br, e)) { e.dead = 0.001; b.life = 0; score += 2; beep(260, 0.2, "square", 0.05, 80); break; }
+  }
+  beams = beams.filter(b => b.life > 0);
+  for (const sp of spikes) if (hurtT <= 0 && state === "play" && hit(p, {x: sp.x + 5, y: sp.y + 6, w: sp.w - 10, h: sp.h - 6})) { hurt(); break; }
   for (const e of enemies) {
     if (state !== "play") break;
     if (e.dead) { e.dead += dt; continue; }
@@ -454,7 +499,7 @@ function update(dt) {
     else if (e.kind === "bat") e.y = e.by + Math.sin(e.t * 2.2 + e.ph) * 34;
     if (hit(p, e)) {
       if (e.kind !== "spiky" && p.vy > 0 && p.y + p.h - e.y < 22) { e.dead = 0.001; p.vy = -420; beep(300, 0.2, "square", 0.05, 100); score += 2; }
-      else if (hurtT <= 0) die();
+      else if (hurtT <= 0) hurt();
     }
   }
   if (state !== "play") return;
@@ -544,6 +589,32 @@ function drawCoins(time) {
   }
 }
 
+function drawPowerups(time) {
+  for (const u of powerups) {
+    if (u.got) continue;
+    const x = u.x - cam; if (x < -40 || x > W + 40) continue;
+    const y = u.y + Math.sin(time * 3 + u.x) * 5, pulse = 0.5 + 0.5 * Math.sin(time * 6 + u.x);
+    const col = u.kind === "laser" ? "255,80,120" : "90,170,255";
+    const g = ctx.createRadialGradient(x, y, 2, x, y, 30 + 4 * pulse);
+    g.addColorStop(0, "rgba(" + col + ",.9)"); g.addColorStop(1, "rgba(" + col + ",0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 34, 0, 7); ctx.fill();
+    ctx.fillStyle = "#0e1a2c"; ctx.beginPath(); ctx.arc(x, y, 15, 0, 7); ctx.fill();
+    ctx.strokeStyle = "rgb(" + col + ")"; ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = "#fff";
+    if (u.kind === "laser") { ctx.beginPath(); ctx.moveTo(x + 2, y - 10); ctx.lineTo(x - 6, y + 2); ctx.lineTo(x, y + 2); ctx.lineTo(x - 2, y + 10); ctx.lineTo(x + 7, y - 3); ctx.lineTo(x + 1, y - 3); ctx.fill(); }
+    else { ctx.beginPath(); ctx.moveTo(x, y - 9); ctx.lineTo(x + 8, y - 5); ctx.lineTo(x + 6, y + 4); ctx.lineTo(x, y + 10); ctx.lineTo(x - 6, y + 4); ctx.lineTo(x - 8, y - 5); ctx.closePath(); ctx.fill(); }
+  }
+}
+function drawBeams() {
+  for (const b of beams) {
+    const x = b.x - cam, x0 = b.dir > 0 ? x - 30 : x, w = 30;
+    const g = ctx.createLinearGradient(x0, 0, x0 + w, 0);
+    if (b.dir > 0) { g.addColorStop(0, "rgba(255,60,100,0)"); g.addColorStop(1, "rgba(255,255,255,1)"); }
+    else { g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(1, "rgba(255,60,100,0)"); }
+    ctx.fillStyle = "rgba(255,60,100,.35)"; rr(x0, b.y - 6, w, 12, 6); ctx.fill();
+    ctx.fillStyle = g; rr(x0, b.y - 2.5, w, 5, 3); ctx.fill();
+  }
+}
 function drawEnemy(e, time) {
   const x = e.x - cam; if (x < -50 || x > W + 50) return;
   if (e.dead) {
@@ -616,6 +687,10 @@ function hud() {
   ctx.fillStyle = "rgba(10,20,40,.55)"; rr(W - 210, 16, 190, 12, 6); ctx.fill();
   ctx.fillStyle = "#7ff3ff"; rr(W - 210, 16, 190 * pr, 12, 6); ctx.fill();
   if (p.sprinting && state === "play") { ctx.fillStyle = "#ffe14d"; ctx.fillText("⚡ RÁPIDO", 14, 54); }
+  let hx = 14;
+  if (p.laser > 0 && state === "play") { ctx.fillStyle = "#ff5c82"; const t = "LÁSER " + Math.ceil(p.laser) + "s  (X)"; ctx.fillText(t, hx, 80); hx += ctx.measureText(t).width + 16; }
+  if (p.shield && state === "play") { ctx.fillStyle = "#6fc0ff"; ctx.fillText("ESCUDO", hx, 80); }
+  document.getElementById("bf").style.visibility = (p.laser > 0 && state === "play") ? "visible" : "hidden";
 }
 
 function banner(t1, t2) {
@@ -631,7 +706,7 @@ function banner(t1, t2) {
     uiButtons.push({x, y, w: bw, h: bh, fn: b.fn});
   });
   ctx.fillStyle = "#b8c4e8"; ctx.font = "14px Arial";
-  ["Moverte: flechas o A/D  ·  Saltar: Espacio o ↑", "⚡ Doble toque en ◀ ▶ (y mantén) = correr rápido", "Salta sobre los monstruos (menos el de pinchos)", "Teclado: Espacio = primera opción  ·  N = juego nuevo"]
+  ["Moverte: flechas o A/D  ·  Saltar: Espacio o ↑", "⚡ Doble toque en ◀ ▶ (y mantén) = correr rápido", "Salta sobre los monstruos · Poderes: salta a agarrarlos · Láser: X o botón", "Teclado: Espacio = primera opción  ·  N = juego nuevo"]
     .forEach((t, i) => ctx.fillText(t, W / 2, 372 + i * 20));
   ctx.textAlign = "left";
 }
@@ -639,10 +714,12 @@ function banner(t1, t2) {
 function draw(time) {
   ctx.save();
   if (shake > 0) ctx.translate((Math.random() - .5) * 8, (Math.random() - .5) * 8);
-  drawBackground(time); drawSolids(); drawSpikes(); drawGoal(time); drawCoins(time);
+  drawBackground(time); drawSolids(); drawSpikes(); drawGoal(time); drawCoins(time); drawPowerups(time);
   enemies.forEach(e => drawEnemy(e, time));
   if (p.sprinting && state === "play") { drawPlayer(time, -16 * p.face, 0.28); drawPlayer(time, -32 * p.face, 0.14); }
   drawPlayer(time);
+  if (p.shield) { const sx = p.x - cam + p.w / 2, sy = p.y + p.h / 2; ctx.strokeStyle = "rgba(120,200,255,.9)"; ctx.fillStyle = "rgba(90,170,255,.2)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(sx, sy, 34 + Math.sin(time * 6) * 2, 0, 7); ctx.fill(); ctx.stroke(); }
+  drawBeams();
   ctx.restore();
   hud();
   ctx.textBaseline = "alphabetic";
@@ -676,6 +753,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 if ('serviceWorker' in navigator) { addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {})); }
+
 </script>
 </body>
 </html>
