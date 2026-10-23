@@ -531,7 +531,8 @@ function update(dt) {
         beep(180, 0.2, "sawtooth", 0.05, 70);
       }
       if (hit(p, boss)) {
-        if (p.vy > 0 && p.y + p.h - boss.y < 26 && boss.inv <= 0) {
+      const prevBottom = (p.y - p.vy * dt) + p.h;
+      if (p.vy > 0 && prevBottom <= boss.y + 6 && boss.inv <= 0) {
           boss.hp--; boss.inv = 0.5; p.vy = -460; beep(300, 0.22, "square", 0.05, 110); score += 5;
           if (boss.hp <= 0) {
             boss.dead = 0.001; const gate = solids.find(s => s.type === "gate"); if (gate) gate.gone = true;
