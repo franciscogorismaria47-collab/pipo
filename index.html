@@ -44,7 +44,7 @@ const W = 800, H = 450, GY = 370, TOTAL = 10;
 const SPEED = 280, SPRINT = 1.65, GRAV = 1700, JUMP = 640;
 
 /* ---------- Temas por nivel ---------- */
-const NEWMON = {1: "Nuevo: salta para agarrar poderes (láser y escudo)", 4: "Nuevo: monstruo verde que salta", 5: "Nuevo: monstruo rojo con pinchos (¡no lo pises!)", 6: "Nuevo: murciélago volador", 7: "Nuevo: monstruo naranja que embiste"};
+const NEWMON = {1: "Nuevo: salta para agarrar poderes (láser y escudo)", 4: "Nuevo: monstruo verde que salta", 5: "Nuevo: monstruo rojo con pinchos (¡no lo pises!)", 6: "Nuevo: murciélago volador", 7: "Nuevo: monstruo naranja que embiste", 10: "¡El Guardián bloquea la salida! Salta 3 veces sobre su cabeza (o dispárale con el láser)"};
 const NAMES = ["El Valle", "Las Colinas", "Atardecer", "Crepúsculo", "Noche Larga", "Hielo", "Volcán", "El Abismo", "Tormenta", "La Torre Final"];
 const THEMES = [
   {s1: "#4fa8ff", s2: "#bfe8ff", h1: "#7ac9a0", h2: "#4ea87a", top: "#4cc152", hi: "#6fe070", dirt: "#8a5a35", dirt2: "#6f4627", sun: "#fff6b0", cloud: "rgba(255,255,255,.85)"},
@@ -60,7 +60,8 @@ const THEMES = [
 ];
 
 /* ---------- Estado del nivel ---------- */
-let solids = [], coins = [], enemies = [], spikes = [], checkpoints = [], powerups = [], beams = [];
+let solids = [], coins = [], enemies = [], spikes = [], checkpoints = [], powerups = [], beams = [], rocks = [];
+let boss = null;
 let shootCd = 0;
 let WORLD = 11500, GOALX = 11280, goalY = GY, theme = THEMES[0];
 let lvl = 1, scoreStart = 0;
@@ -240,6 +241,14 @@ function placePowerups(n) {
     if (best) powerups.push({x: best.cx, y: best.s.y - 88, kind: (i + Math.floor(R() * 2)) % 2 === 0 ? "laser" : "shield", got: false});
   });
 }
+/* jefe final: aparece solo en el ultimo nivel, bloqueando la meta hasta que se le gane */
+function placeBoss() {
+  const bw = 72, bh = 92, gy = goalY;
+  const minX = GOALX - 420, maxX = GOALX - 170;
+  boss = {x: maxX, y: gy - bh, w: bw, h: bh, hp: 3, maxHp: 3, dir: -1, minX, maxX, t: 0, cdAtk: 1.8, dead: 0, inv: 0};
+  solids.push({x: GOALX - 90, y: gy - 420, w: 22, h: 420, type: "gate"});
+}
+
 function hurt() {
   if (p.shield) { p.shield = false; hurtT = 1.0; shake = 0.15; beep(500, 0.25, "triangle", 0.06, 150); return; }
   die();
@@ -252,9 +261,10 @@ function shoot() {
 }
 function loadLevel(n) {
   lvl = n; theme = THEMES[n - 1];
-  solids = []; coins = []; enemies = []; spikes = []; checkpoints = []; powerups = []; beams = []; shootCd = 0;
+  solids = []; coins = []; enemies = []; spikes = []; checkpoints = []; powerups = []; beams = []; rocks = []; boss = null; shootCd = 0;
   if (n === 1) buildLevel1(); else genLevel(n);
   placePowerups(n);
+  if (n === TOTAL) placeBoss();
   p = {x: 60, y: GY - 44, w: 28, h: 44, vx: 0, vy: 0, ground: false, face: 1, anim: 0, on: null, sprinting: false, laser: 0, shield: false};
   cam = 0; lives = 3; score = scoreStart; cp = checkpoints[0]; elapsed = 0; finalT = 0; hurtT = 0; shake = 0; mt = 0; introT = 2.2;
   enemies.forEach(e => { e.dead = 0; e.x = (e.min + e.max) / 2; });
@@ -416,7 +426,7 @@ const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a
 function die() {
   lives--; shake = 0.3; beep(220, 0.4, "sawtooth", 0.07, 60);
   if (lives <= 0) { state = "over"; stateT = 0.7; return; }
-  p.x = cp.x; p.y = cp.gy - 60; p.vx = 0; p.vy = 0; p.on = null; hurtT = 1.5; p.laser = 0; p.shield = false; beams = [];
+  p.x = cp.x; p.y = cp.gy - 60; p.vx = 0; p.vy = 0; p.on = null; hurtT = 1.5; p.laser = 0; p.shield = false; beams = []; rocks = [];
 }
 
 function update(dt) {
@@ -479,6 +489,10 @@ function update(dt) {
     const br = {x: b.dir > 0 ? b.x - 26 : b.x, y: b.y - 12, w: 26, h: 24};
     for (const s of solids) if (!s.gone && hit(br, s)) { b.life = 0; break; }
     for (const e of enemies) if (!e.dead && hit(br, e)) { e.dead = 0.001; b.life = 0; score += 2; beep(260, 0.2, "square", 0.05, 80); break; }
+    if (b.life > 0 && boss && !boss.dead && boss.inv <= 0 && hit(br, boss)) {
+      boss.hp--; boss.inv = 0.5; b.life = 0; beep(300, 0.22, "square", 0.05, 110); score += 5;
+      if (boss.hp <= 0) { boss.dead = 0.001; const gate = solids.find(s => s.type === "gate"); if (gate) gate.gone = true; score += 25; beep(520, 0.5, "triangle", 0.08, 1040); }
+    }
   }
   beams = beams.filter(b => b.life > 0);
   for (const sp of spikes) if (hurtT <= 0 && state === "play" && hit(p, {x: sp.x + 5, y: sp.y + 6, w: sp.w - 10, h: sp.h - 6})) { hurt(); break; }
@@ -502,6 +516,34 @@ function update(dt) {
       else if (hurtT <= 0) hurt();
     }
   }
+  if (state === "play" && boss) {
+    if (boss.dead) { boss.dead += dt; }
+    else {
+      boss.t += dt; boss.inv = Math.max(0, boss.inv - dt);
+      boss.x += boss.dir * 65 * dt;
+      if (boss.x < boss.minX) { boss.x = boss.minX; boss.dir = 1; }
+      if (boss.x + boss.w > boss.maxX) { boss.x = boss.maxX; boss.dir = -1; }
+      boss.cdAtk -= dt;
+      if (boss.cdAtk <= 0 && Math.abs((boss.x + boss.w / 2) - (p.x + p.w / 2)) < 480) {
+        boss.cdAtk = 1.9;
+        const bdir = (p.x + p.w / 2) > (boss.x + boss.w / 2) ? 1 : -1;
+        rocks.push({x: boss.x + boss.w / 2, y: boss.y + 14, vx: bdir * 190, vy: -520, life: 3});
+        beep(180, 0.2, "sawtooth", 0.05, 70);
+      }
+      if (hit(p, boss)) {
+        if (p.vy > 0 && p.y + p.h - boss.y < 26 && boss.inv <= 0) {
+          boss.hp--; boss.inv = 0.5; p.vy = -460; beep(300, 0.22, "square", 0.05, 110); score += 5;
+          if (boss.hp <= 0) {
+            boss.dead = 0.001; const gate = solids.find(s => s.type === "gate"); if (gate) gate.gone = true;
+            score += 25; beep(520, 0.5, "triangle", 0.08, 1040);
+          }
+        } else if (hurtT <= 0) hurt();
+      }
+    }
+  }
+  for (const r of rocks) { r.x += r.vx * dt; r.y += r.vy * dt; r.vy += GRAV * 0.6 * dt; r.life -= dt; }
+  for (const r of rocks) if (r.life > 0 && hurtT <= 0 && state === "play" && hit(p, {x: r.x - 10, y: r.y - 10, w: 20, h: 20})) { hurt(); r.life = 0; }
+  rocks = rocks.filter(r => r.life > 0 && r.y < H + 80);
   if (state !== "play") return;
   for (const k of checkpoints) if (p.x > k.x + 60 && k.x > cp.x) cp = k;
   if (p.x > GOALX) { state = "win"; stateT = 0.7; finalT = elapsed; if (lvl < TOTAL) { save(lvl + 1); saveBest(lvl + 1); } else { save(1); saveBest(TOTAL); } beep(660, 0.5, "triangle", 0.06, 1320); }
@@ -560,6 +602,12 @@ function drawSolids() {
       ctx.fillStyle = lo;
       for (let k = 20; k < s.w; k += 30) ctx.fillRect(x + k, y + 8, 2, 12);
       if (s.mv) { ctx.fillStyle = "#fff"; ctx.fillRect(x + s.w / 2 - 10, y + 9, 20, 3); }
+    } else if (s.type === "gate") {
+      if (!s.gone) {
+        ctx.fillStyle = "#2a2f45"; ctx.fillRect(x, y, s.w, s.h);
+        ctx.fillStyle = "#565f85";
+        for (let ty = 10; ty < s.h; ty += 26) ctx.fillRect(x + 3, y + ty, s.w - 6, 14);
+      }
     } else {
       for (let ty = 0; ty < s.h; ty += 40) for (let tx = 0; tx < s.w; tx += 40) {
         const cw = Math.min(40, s.w - tx), ch = Math.min(40, s.h - ty);
@@ -613,6 +661,36 @@ function drawBeams() {
     else { g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(1, "rgba(255,60,100,0)"); }
     ctx.fillStyle = "rgba(255,60,100,.35)"; rr(x0, b.y - 6, w, 12, 6); ctx.fill();
     ctx.fillStyle = g; rr(x0, b.y - 2.5, w, 5, 3); ctx.fill();
+    }
+}
+function drawBoss(time) {
+  if (!boss) return;
+  const x = boss.x - cam; if (x < -120 || x > W + 120) return;
+  if (boss.dead) {
+    if (boss.dead > 0.5) return;
+    ctx.fillStyle = "#4a2a5a"; rr(x, boss.y + boss.h - 10, boss.w, 10, 5); ctx.fill(); return;
+  }
+  const bob = Math.sin(time * 3.5) * 4;
+  const flash = boss.inv > 0 && Math.floor(time * 16) % 2;
+  ctx.fillStyle = flash ? "#ffffff" : "#4a2a5a"; rr(x, boss.y + bob, boss.w, boss.h, 16); ctx.fill();
+  ctx.fillStyle = flash ? "#ffd0e6" : "#7a4aa8"; rr(x + 8, boss.y + bob + 12, boss.w - 16, boss.h - 32, 10); ctx.fill();
+  ctx.fillStyle = "#ffe14d";
+  ctx.beginPath(); ctx.arc(x + boss.w * 0.32, boss.y + bob + 32, 8, 0, 7); ctx.arc(x + boss.w * 0.68, boss.y + bob + 32, 8, 0, 7); ctx.fill();
+  ctx.fillStyle = "#1c1030"; const dd = boss.dir * 2;
+  ctx.beginPath(); ctx.arc(x + boss.w * 0.32 + dd, boss.y + bob + 32, 3.4, 0, 7); ctx.arc(x + boss.w * 0.68 + dd, boss.y + bob + 32, 3.4, 0, 7); ctx.fill();
+  ctx.fillStyle = "#1c1030"; rr(x + 10, boss.y + bob + boss.h - 18, boss.w - 20, 10, 4); ctx.fill();
+  for (let i = 0; i < boss.maxHp; i++) {
+    ctx.fillStyle = i < boss.hp ? "#ff6b81" : "rgba(255,255,255,.25)";
+    ctx.beginPath(); ctx.arc(x + boss.w / 2 - (boss.maxHp - 1) * 9 + i * 18, boss.y + bob - 16, 6, 0, 7); ctx.fill();
+  }
+}
+function drawRocks(time) {
+  for (const r of rocks) {
+    const x = r.x - cam; if (x < -30 || x > W + 30) continue;
+    ctx.save(); ctx.translate(x, r.y); ctx.rotate(r.x * 0.01 + time);
+    ctx.fillStyle = "#6a5244";
+    ctx.beginPath(); ctx.moveTo(-10, -6); ctx.lineTo(8, -10); ctx.lineTo(11, 4); ctx.lineTo(-4, 10); ctx.lineTo(-12, 2); ctx.closePath(); ctx.fill();
+    ctx.restore();
   }
 }
 function drawEnemy(e, time) {
@@ -715,7 +793,7 @@ function draw(time) {
   ctx.save();
   if (shake > 0) ctx.translate((Math.random() - .5) * 8, (Math.random() - .5) * 8);
   drawBackground(time); drawSolids(); drawSpikes(); drawGoal(time); drawCoins(time); drawPowerups(time);
-  enemies.forEach(e => drawEnemy(e, time));
+  enemies.forEach(e => drawEnemy(e, time)); drawBoss(time); drawRocks(time);
   if (p.sprinting && state === "play") { drawPlayer(time, -16 * p.face, 0.28); drawPlayer(time, -32 * p.face, 0.14); }
   drawPlayer(time);
   if (p.shield) { const sx = p.x - cam + p.w / 2, sy = p.y + p.h / 2; ctx.strokeStyle = "rgba(120,200,255,.9)"; ctx.fillStyle = "rgba(90,170,255,.2)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(sx, sy, 34 + Math.sin(time * 6) * 2, 0, 7); ctx.fill(); ctx.stroke(); }
