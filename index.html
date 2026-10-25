@@ -1006,7 +1006,7 @@ function update3D(dt) {
   if (tdKeys["a"] || tdKeys["arrowleft"]) mx = -1;
   if (tdKeys["d"] || tdKeys["arrowright"]) mx = 1;
   const moveDir = new THREE.Vector3();
-  moveDir.addScaledVector(fwd, -mz); moveDir.addScaledVector(right, mx);
+  moveDir.addScaledVector(fwd, -mz); moveDir.addScaledVector(right, -mx);
   if (moveDir.lengthSq() > 1) moveDir.normalize();
   const speed = 5.2;
   tdPlayer.pos.x += moveDir.x * speed * dt; tdPlayer.pos.z += moveDir.z * speed * dt;
